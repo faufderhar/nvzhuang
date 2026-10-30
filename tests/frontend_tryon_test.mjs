@@ -121,4 +121,14 @@ assert.equal(context.getErrorMessageFromResponse({status: 403, ok: false}, null)
 assert.match(context.getErrorMessageFromResponse({status: 502, ok: false}, null).text, /502/);
 assert.match(context.getErrorMessageFromResponse({status: 200, ok: true}, null).text, /invalid response/);
 
+// /comfyui/health 已纳入后端鉴权：设置页“测试连接”必须携带后端 Token
+{
+  const start = html.indexOf("settingsComfyTest.addEventListener('click'");
+  assert.ok(start >= 0, 'missing ComfyUI health handler');
+  const handler = html.slice(start, html.indexOf('settingsForm.addEventListener', start));
+  assert.match(handler, /settingsBackendToken\.value/, 'health check must read backend token');
+  assert.match(handler, /\['Authorization'\]\s*=\s*'Bearer '/, 'health check must send Authorization header');
+  assert.match(handler, /fetch\(backendUrl \+ '\/comfyui\/health', \{headers:healthHeaders\}\)/);
+}
+
 console.log('frontend try-on tests passed');

@@ -17,12 +17,18 @@ func NewRateLimitMiddleware(limiter *security.RateLimiter) *RateLimitMiddleware 
 	return &RateLimitMiddleware{limiter: limiter}
 }
 
+// Handler 按规范化路径判断是否需要限流，可挂在全局路由组上。
 func (m *RateLimitMiddleware) Handler(r *ghttp.Request) {
-	if r.Method == http.MethodOptions {
+	if r.Method == http.MethodOptions || !IsProtectedPath(r.URL.Path) {
 		r.Middleware.Next()
 		return
 	}
-	if r.URL.Path != "/tryon" {
+	m.Enforce(r)
+}
+
+// Enforce 无条件执行限流，用于直接挂在受保护的路由组上。
+func (m *RateLimitMiddleware) Enforce(r *ghttp.Request) {
+	if r.Method == http.MethodOptions {
 		r.Middleware.Next()
 		return
 	}
@@ -31,8 +37,13 @@ func (m *RateLimitMiddleware) Handler(r *ghttp.Request) {
 	if principalID == "" {
 		principalID = "anonymous"
 	}
+	key := principalID
+	if !IsTryonPath(r.URL.Path) {
+		// 健康检查等辅助接口使用独立的令牌桶，不消耗换装额度
+		key = "aux:" + principalID
+	}
 
-	ok, retryAfter := m.limiter.Allow(principalID)
+	ok, retryAfter := m.limiter.Allow(key)
 	if !ok {
 		r.Response.Header().Set("Retry-After", fmt.Sprintf("%d", retryAfter))
 		WriteAPIError(r, security.ErrRateLimited)

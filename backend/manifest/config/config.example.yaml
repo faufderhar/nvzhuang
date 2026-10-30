@@ -63,7 +63,7 @@ server:
 #     pprofPattern:        ""                 # 开启PProf时有效，表示PProf特性的页面访问路径，对当前Server绑定的所有域名有效。
 
 #     # 其他配置
-#     clientMaxBodySize:   810241024          # 客户端最大Body上传限制大小，影响文件上传大小(Byte)。默认为8*1024*1024=8MB
+#     clientMaxBodySize:   810241024          # 无需配置：启动时自动设为 upload.maxRequestBodyBytes + 1MiB，超限统一返回 413 REQUEST_TOO_LARGE
 #     formParsingMemory:   1048576            # 解析表单时的缓冲区大小(Byte)，一般不需要配置。默认为1024*1024=1MB
 #     nameToUriType:       0                  # 路由注册中使用对象注册时的路由生成规则。默认为0
 #     routeOverWrite:      false              # 当遇到重复路由注册时是否强制覆盖。默认为false，重复路由存在时将会在启动时报错退出
@@ -199,6 +199,7 @@ security:
     - "http://localhost:3000"
     - "http://127.0.0.1:3000"
   allowPrivateNetwork: false        # 是否允许来自私有网络的 PNA 预检
+  trustedProxies: []                # 可信反向代理 IP/CIDR（如 ["127.0.0.1"]）。仅这些地址转发的 X-Forwarded-For 才会被采信；为空时只用 TCP 对端地址做限流
   rateLimit:
     requestsPerMinute: 10           # 单调用方每分钟请求速率上限
     burst: 3                        # 允许短时间突发容量

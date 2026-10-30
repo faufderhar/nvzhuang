@@ -1821,7 +1821,11 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     settingsComfyTest.textContent = t('settingsComfyTesting');
     setSettingsMessage('');
     try{
-      const resp = await fetch(backendUrl + '/comfyui/health', {headers:{'Accept':'application/json'}});
+      const healthHeaders = {'Accept':'application/json'};
+      let healthToken = settingsBackendToken.value.trim();
+      if(healthToken.toLowerCase().startsWith('bearer ')) healthToken = healthToken.slice(7).trim();
+      if(healthToken) healthHeaders['Authorization'] = 'Bearer ' + healthToken;
+      const resp = await fetch(backendUrl + '/comfyui/health', {headers:healthHeaders});
       const body = await resp.json();
       const result = body && body.data ? body.data : body;
       if(!resp.ok || !result || result.available !== true) throw new Error('unavailable');

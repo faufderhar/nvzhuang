@@ -19,10 +19,7 @@ func GetRequestID(r *ghttp.Request) string {
 	if val := r.GetCtxVar(CtxRequestID); !val.IsEmpty() {
 		return val.String()
 	}
-	if id := r.Header.Get("X-Request-ID"); id != "" {
-		return id
-	}
-	return ""
+	return SanitizeRequestID(r.Header.Get("X-Request-ID"))
 }
 
 func GenerateRequestID() string {

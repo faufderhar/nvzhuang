@@ -2,17 +2,23 @@ package security
 
 import (
 	"context"
+	"fmt"
+	"net/netip"
+	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
 )
 
 type SecurityConfig struct {
-	AuthRequired        bool              `json:"authRequired"`
-	APIKeysEnv          string            `json:"apiKeysEnv"`
-	TrustedOrigins      []string          `json:"trustedOrigins"`
-	AllowPrivateNetwork bool              `json:"allowPrivateNetwork"`
-	RateLimit           RateLimitConfig   `json:"rateLimit"`
-	Concurrency         ConcurrencyConfig `json:"concurrency"`
+	AuthRequired        bool     `json:"authRequired"`
+	APIKeysEnv          string   `json:"apiKeysEnv"`
+	TrustedOrigins      []string `json:"trustedOrigins"`
+	AllowPrivateNetwork bool     `json:"allowPrivateNetwork"`
+	// TrustedProxies 可信反向代理的 IP 或 CIDR。只有来自这些地址的请求，
+	// 才会采信 X-Forwarded-For / X-Real-IP；为空时一律使用 TCP 对端地址。
+	TrustedProxies []string          `json:"trustedProxies"`
+	RateLimit      RateLimitConfig   `json:"rateLimit"`
+	Concurrency    ConcurrencyConfig `json:"concurrency"`
 }
 
 type RateLimitConfig struct {
@@ -91,4 +97,30 @@ func LoadSecurityConfig(ctx context.Context) (*SecurityConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// ParseTrustedProxies 解析可信代理列表（支持单个 IP 或 CIDR），格式错误时返回错误以便启动失败。
+func ParseTrustedProxies(items []string) ([]netip.Prefix, error) {
+	var prefixes []netip.Prefix
+	for _, raw := range items {
+		item := strings.TrimSpace(raw)
+		if item == "" {
+			continue
+		}
+		if strings.Contains(item, "/") {
+			p, err := netip.ParsePrefix(item)
+			if err != nil {
+				return nil, fmt.Errorf("security.trustedProxies 格式错误: %q", item)
+			}
+			prefixes = append(prefixes, p.Masked())
+			continue
+		}
+		addr, err := netip.ParseAddr(item)
+		if err != nil {
+			return nil, fmt.Errorf("security.trustedProxies 格式错误: %q", item)
+		}
+		addr = addr.Unmap()
+		prefixes = append(prefixes, netip.PrefixFrom(addr, addr.BitLen()))
+	}
+	return prefixes, nil
 }
