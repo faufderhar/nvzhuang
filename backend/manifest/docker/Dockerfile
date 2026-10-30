@@ -1,5 +1,5 @@
 # 构建阶段
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 # 先复制依赖文件，利用 Docker 层缓存
