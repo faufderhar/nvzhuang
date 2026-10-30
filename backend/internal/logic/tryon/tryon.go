@@ -16,10 +16,10 @@ import (
 // DoTryonWithValidatedImages 使用已完成安全校验的图片结构执行换装
 func DoTryonWithValidatedImages(ctx context.Context, personImg, garmentImg *imagevalidate.ValidatedImage, model, size, lang string, clientConfig *ModelConfig) (resultB64, usedModel, usedPrompt string, err error) {
 	if personImg == nil || len(personImg.Data) == 0 {
-		return "", "", "", gerror.New("人像照片不能为空")
+		return "", "", "", gerror.NewCode(gcode.CodeInvalidParameter, "人像照片不能为空")
 	}
 	if garmentImg == nil || len(garmentImg.Data) == 0 {
-		return "", "", "", gerror.New("服装图不能为空")
+		return "", "", "", gerror.NewCode(gcode.CodeInvalidParameter, "服装图不能为空")
 	}
 
 	personB64 := base64.StdEncoding.EncodeToString(personImg.Data)
