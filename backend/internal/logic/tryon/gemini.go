@@ -86,8 +86,8 @@ func (g *Gemini) Generate(ctx context.Context, personB64, garmentB64, prompt, si
 				Role: "user",
 				Parts: []geminiPart{
 					{Text: prompt},
-					{InlineData: &geminiInlineData{MimeType: "image/png", Data: ensureBase64(personB64)}},
-					{InlineData: &geminiInlineData{MimeType: "image/png", Data: ensureBase64(garmentB64)}},
+					{InlineData: &geminiInlineData{MimeType: inputImageMIME(personB64), Data: ensureBase64(personB64)}},
+					{InlineData: &geminiInlineData{MimeType: inputImageMIME(garmentB64), Data: ensureBase64(garmentB64)}},
 				},
 			},
 		},

@@ -109,7 +109,6 @@ cp manifest/config/config.example.yaml manifest/config/config.yaml
   "garment_image": "服装图 base64",
   "model": "gemini",
   "size": "1024x1536",
-  "keep_face": true,
   "lang": "zh",
   "client_config": {
     "provider": "gemini",

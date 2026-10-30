@@ -113,7 +113,10 @@ type chatVisionResponse struct {
 	Error *gptAPIError `json:"error,omitempty"`
 }
 
-// describeVisualFeatures 调用中转站/OpenAI 的轻量视觉模型提取人像与服装精确特征
+// describeVisualFeatures 调用中转站/OpenAI 的轻量视觉模型提取人像与服装精确特征。
+// 数据流说明：仅当模型名或别名包含 gpt-image 时触发；人像与服装图会额外发送到同一 Base URL 下的
+// 视觉模型（官方 OpenAI 为 gpt-4o-mini，其余中转站为 gemini-3.5-flash-lite），使用同一个 API Key。
+// 该行为已在 DEPLOY.md 的“数据流向”一节中说明。
 func (o *OpenAIImages) describeVisualFeatures(ctx context.Context, personB64, garmentB64 string) string {
 	visionModel := "gemini-3.5-flash-lite"
 	if strings.Contains(o.baseURL, "api.openai.com") {
@@ -133,13 +136,13 @@ func (o *OpenAIImages) describeVisualFeatures(ctx context.Context, personB64, ga
 					{
 						Type: "image_url",
 						ImageURL: &chatImageURL{
-							URL: "data:image/png;base64," + ensureBase64(personB64),
+							URL: inputImageDataURL(personB64),
 						},
 					},
 					{
 						Type: "image_url",
 						ImageURL: &chatImageURL{
-							URL: "data:image/png;base64," + ensureBase64(garmentB64),
+							URL: inputImageDataURL(garmentB64),
 						},
 					},
 				},
@@ -200,15 +203,15 @@ func (o *OpenAIImages) Generate(ctx context.Context, personB64, garmentB64, prom
 	}
 
 	// 换装场景需要「人像 + 服装」两张参考图。
-	// 绝大多数 OpenAI 兼容中转站（含用户的中转站 cpa.paipiange.com）对 gpt-image-2 走
+	// 绝大多数 OpenAI 兼容中转站对 gpt-image-2 走
 	// 火山方舟式多图生图协议：prompt 必填 + image[] 传参考图，返回 b64_json。
 	// 这里统一用 prompt + image[]，对官方 OpenAI 协议则由后端中转站自行兼容。
 	reqBody := gptImageRequest{
 		Model:  o.model,
 		Prompt: prompt,
 		Image: []string{
-			"data:image/png;base64," + ensureBase64(personB64),
-			"data:image/png;base64," + ensureBase64(garmentB64),
+			inputImageDataURL(personB64),
+			inputImageDataURL(garmentB64),
 		},
 		Size:    normalizeOpenAISize(size),
 		Quality: "high",
