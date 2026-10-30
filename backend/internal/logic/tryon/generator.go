@@ -3,8 +3,8 @@ package tryon
 import (
 	"context"
 	"fmt"
-	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -149,47 +149,16 @@ func NewGeneratorFromClientConfig(cfg *ModelConfig) (ImageGenerator, error) {
 	return newGeneratorFromConfig(clean)
 }
 
+// newModelHTTPClient 创建模型服务 HTTP 客户端。
+// 所有客户端都限制重定向（禁止跨主机与协议降级，防止自定义鉴权头外泄）；
+// 配置来自浏览器时，额外只允许连接公网全球单播地址的 443 端口，并关闭系统代理。
 func newModelHTTPClient(restrictPrivateNetwork bool) *http.Client {
-	client := &http.Client{Timeout: 180 * time.Second}
+	client := &http.Client{Timeout: 180 * time.Second, CheckRedirect: checkModelRedirect}
 	if !restrictPrivateNetwork {
 		return client
 	}
-
-	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	// 用户可控 URL 不走系统代理，避免代理代为访问内网地址而绕过下面的目标 IP 校验。
-	transport.Proxy = nil
-	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
-		host, port, err := net.SplitHostPort(address)
-		if err != nil {
-			return nil, fmt.Errorf("模型服务地址无效")
-		}
-		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
-		if err != nil || len(ips) == 0 {
-			return nil, fmt.Errorf("模型服务域名解析失败")
-		}
-		foundPublic := false
-		for _, ip := range ips {
-			if isForbiddenClientIP(ip) {
-				continue
-			}
-			foundPublic = true
-			conn, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
-			if dialErr == nil {
-				return conn, nil
-			}
-		}
-		if !foundPublic {
-			return nil, fmt.Errorf("模型服务地址不允许访问")
-		}
-		return nil, fmt.Errorf("无法连接模型服务")
-	}
-	client.Transport = transport
+	client.Transport = newRestrictedTransport(clientAllowedPorts)
 	return client
-}
-
-func isForbiddenClientIP(ip net.IP) bool {
-	return !ip.IsGlobalUnicast() || ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()
 }
 
 func newGeneratorFromConfig(cfg *ModelConfig) (ImageGenerator, error) {
@@ -224,22 +193,38 @@ func validateClientModelConfig(cfg *ModelConfig) error {
 		return fmt.Errorf("Base URL 不能为空或过长")
 	}
 
-	u, err := url.Parse(cfg.BaseURL)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
-		return fmt.Errorf("Base URL 必须是有效的 HTTP/HTTPS 地址")
+	u, err := parseHTTPSURL(cfg.BaseURL)
+	if err != nil {
+		return err
 	}
-	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("Base URL 不能包含账号、查询参数或片段")
+	if !isAllowedClientPort(u.Port()) {
+		return fmt.Errorf("Base URL 端口不允许访问（仅支持 HTTPS 默认端口 443）")
 	}
 
 	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return fmt.Errorf("Base URL 不允许指向本机地址")
 	}
-	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()) {
+	if addr, err := netip.ParseAddr(host); err == nil && isForbiddenAddr(addr) {
 		return fmt.Errorf("Base URL 不允许指向内网或保留地址")
 	}
 	return nil
+}
+
+// parseHTTPSURL 解析并校验远端地址：必须是 HTTPS、带主机名，且不含账号、查询参数或片段。
+// 浏览器自定义配置不允许指向本机，因此这里不存在 loopback 例外（与 AGENTS.md “非本机远端必须 HTTPS”一致）。
+func parseHTTPSURL(raw string) (*url.URL, error) {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" {
+		return nil, fmt.Errorf("Base URL 必须是有效的 HTTPS 地址")
+	}
+	if u.Scheme != "https" {
+		return nil, fmt.Errorf("Base URL 必须使用 HTTPS")
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("Base URL 不能包含账号、查询参数或片段")
+	}
+	return u, nil
 }
 
 // getKey 优先取环境变量，其次取配置文件

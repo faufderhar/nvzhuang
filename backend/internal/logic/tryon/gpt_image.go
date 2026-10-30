@@ -175,7 +175,7 @@ func (o *OpenAIImages) describeVisualFeatures(ctx context.Context, personB64, ga
 	}
 
 	var res chatVisionResponse
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, visionMaxResponseBytes)).Decode(&res); err != nil {
 		return ""
 	}
 	if len(res.Choices) > 0 {
@@ -232,7 +232,10 @@ func (o *OpenAIImages) Generate(ctx context.Context, personB64, garmentB64, prom
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := readModelResponse(resp)
+	if err != nil {
+		return "", err
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("图像 API 错误 (status %d): %s", resp.StatusCode, truncate(string(respBody), 500))
 	}
@@ -259,20 +262,7 @@ func (o *OpenAIImages) Generate(ctx context.Context, personB64, garmentB64, prom
 
 // downloadImage 下载 URL 图片并转 base64（部分服务商只返回 URL）
 func (o *OpenAIImages) downloadImage(ctx context.Context, url string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return "", fmt.Errorf("结果图片地址无效")
-	}
-	resp, err := o.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("无法下载模型结果图片")
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(data), nil
+	return downloadResultImage(ctx, url)
 }
 
 // ensureBase64 兼容：如果传入的是 data URL，去掉前缀

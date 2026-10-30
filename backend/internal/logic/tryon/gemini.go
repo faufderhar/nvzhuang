@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -117,7 +116,10 @@ func (g *Gemini) Generate(ctx context.Context, personB64, garmentB64, prompt, si
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := readModelResponse(resp)
+	if err != nil {
+		return "", err
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("Gemini API error (status %d): %s", resp.StatusCode, truncate(string(respBody), 500))
 	}

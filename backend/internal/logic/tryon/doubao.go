@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"strings"
 )
@@ -98,7 +97,10 @@ func (d *Doubao) Generate(ctx context.Context, personB64, garmentB64, prompt, si
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := readModelResponse(resp)
+	if err != nil {
+		return "", err
+	}
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("豆包 API 错误 (status %d): %s", resp.StatusCode, truncate(string(respBody), 500))
 	}
@@ -126,20 +128,7 @@ func (d *Doubao) Generate(ctx context.Context, personB64, garmentB64, prompt, si
 
 // downloadImage 下载 URL 图片并转 base64
 func (d *Doubao) downloadImage(ctx context.Context, url string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return "", fmt.Errorf("结果图片地址无效")
-	}
-	resp, err := d.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("无法下载模型结果图片")
-	}
-	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", err
-	}
-	return encodeB64(data), nil
+	return downloadResultImage(ctx, url)
 }
 
 // normalizeDoubaoSize 把 OpenAI 风格的尺寸转成豆包支持的像素格式
