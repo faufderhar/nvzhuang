@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
+<!-- 内容安全策略：禁止加载第三方脚本/插件/表单目标；connect-src 允许 https 与本机回环，以支持用户自定义的试穿后端。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:* data: blob:; media-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; worker-src 'none'; manifest-src 'self'">
 <meta name="description" content="拍片哥女装 (COSTUME-DB-01) — AI 服装参考图集，收录 1407 套高品质服装图片（2:3），支持一键 AI 试穿换装与中英文双向检索。">
 <title>拍片哥女装 · AI 服装参考图集</title>
 <script>
@@ -707,6 +709,16 @@ footer a:hover{color:var(--tx);text-decoration:underline}
         </fieldset>
       </section>
 
+      <section class="settings-section">
+        <label class="settings-toggle">
+          <input id="settingsSessionOnly" type="checkbox">
+          <span class="settings-toggle-copy">
+            <strong data-i18n="settingsSessionOnly">仅在本次会话中保存</strong>
+            <small data-i18n="settingsSessionOnlyHelp">勾选后 Token 与 API Key 只保存在当前标签页会话中，关闭标签页即清除，不写入长期存储。共享设备建议勾选。</small>
+          </span>
+        </label>
+      </section>
+
       <div class="settings-note" id="settingsPrivacy" data-i18n="settingsPrivacy">隐私说明：配置只保存在当前浏览器。启用个人配置时，Key 与 Base URL 会随本次请求发送给你填写的试穿后端；后端只在内存中临时使用，不写数据库、配置文件或日志。共享设备使用后请清除。</div>
       <div class="settings-message" id="settingsMessage" role="status" aria-live="polite"></div>
       <div class="settings-actions">
@@ -849,6 +861,7 @@ const I18N = {
     settingsPrivacy: '隐私说明：配置只保存在当前浏览器。启用个人配置时，Key 与 Base URL 会随本次请求发送给你填写的试穿后端；后端只在内存中临时使用，不写数据库、配置文件或日志。共享设备使用后请清除。',
     settingsComfyPrivacy: '隐私说明：ComfyUI 模式只向你填写的本机换装后端发送人物图和服装图；固定工作流地址与节点由本机后端管理，不会发送 API Key，也不会把本机模型路径写入浏览器记录。',
     settingsClear: '清除本地配置', settingsCancel: '取消', settingsSave: '保存设置',
+    settingsSessionOnly: '仅在本次会话中保存', settingsSessionOnlyHelp: '勾选后 Token 与 API Key 只保存在当前标签页会话中，关闭标签页即清除，不写入长期存储。共享设备建议勾选。',
     settingsSaved: '设置已保存', settingsCleared: '本地配置已清除',
     settingsComfyHelp: '通过本机换装后端检查 ComfyUI、固定工作流和所需节点，不会上传图片或执行生成。',
     settingsComfyTest: '测试连接', settingsComfyTesting: '检测中…', settingsComfyReady: 'ComfyUI 固定工作流可用', settingsComfyUnavailable: '无法连接 ComfyUI，请确认 ComfyUI 与本机换装后端均已启动',
@@ -972,6 +985,7 @@ const I18N = {
     settingsPrivacy: 'Privacy: Settings stay in this browser. When personal configuration is enabled, the key and Base URL are sent to your selected try-on backend for that request only. The backend uses them in memory and does not write them to a database, config file, or logs. Clear them after use on a shared device.',
     settingsComfyPrivacy: 'Privacy: ComfyUI mode sends the person and garment images only to the local try-on backend you configured. The fixed workflow and model paths stay under local backend control; no API key or local model path is stored in browser history.',
     settingsClear: 'Clear local settings', settingsCancel: 'Cancel', settingsSave: 'Save settings',
+    settingsSessionOnly: 'Keep for this session only', settingsSessionOnlyHelp: 'When checked, the token and API key are kept only in this tab session and cleared when the tab closes; nothing is written to long-term storage. Recommended on shared devices.',
     settingsSaved: 'Settings saved', settingsCleared: 'Local settings cleared',
     settingsComfyHelp: 'Checks ComfyUI, the fixed workflow, and required nodes through the local try-on backend. No images are uploaded and no generation is started.',
     settingsComfyTest: 'Test connection', settingsComfyTesting: 'Checking…', settingsComfyReady: 'The fixed ComfyUI workflow is ready', settingsComfyUnavailable: 'Cannot reach ComfyUI. Make sure ComfyUI and the local try-on backend are running.',
@@ -1317,7 +1331,7 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
   const SETTINGS_DEFAULTS = {
     backendUrl: '', backendToken: '', useCustom: false, provider: 'gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    apiKey: '', model: 'gemini-3.1-flash-image'
+    apiKey: '', model: 'gemini-3.1-flash-image', sessionOnly: false
   };
   const PROVIDER_DEFAULTS = {
     gemini: {baseUrl:'https://generativelanguage.googleapis.com/v1beta', model:'gemini-3.1-flash-image'},
@@ -1331,6 +1345,7 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
   const settingsBackendToken = document.getElementById('settingsBackendToken');
   const settingsTokenToggle = document.getElementById('settingsTokenToggle');
   const settingsUseCustom = document.getElementById('settingsUseCustom');
+  const settingsSessionOnly = document.getElementById('settingsSessionOnly');
   const settingsCustomFields = document.getElementById('settingsCustomFields');
   const settingsProvider = document.getElementById('settingsProvider');
   const settingsBaseField = document.getElementById('settingsBaseField');
@@ -1374,9 +1389,32 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
   const HISTORY_STORE = 'generations';
   let historyDbPromise = null;
 
+  // 读取设置：会话存储优先（“仅本次会话”模式），其次长期存储
+  function readStoredSettings(){
+    try{
+      const session = sessionStorage.getItem(SETTINGS_KEY);
+      if(session) return session;
+    }catch(_){}
+    return localStorage.getItem(SETTINGS_KEY);
+  }
+  // 写入设置：会话模式下只写 sessionStorage 并清除 localStorage 中的旧副本，反之亦然
+  function persistSettings(settings){
+    const serialized = JSON.stringify(settings);
+    if(settings.sessionOnly){
+      sessionStorage.setItem(SETTINGS_KEY, serialized);
+      try{ localStorage.removeItem(SETTINGS_KEY); }catch(_){}
+    }else{
+      localStorage.setItem(SETTINGS_KEY, serialized);
+      try{ sessionStorage.removeItem(SETTINGS_KEY); }catch(_){}
+    }
+  }
+  function clearStoredSettings(){
+    try{ localStorage.removeItem(SETTINGS_KEY); }catch(_){}
+    try{ sessionStorage.removeItem(SETTINGS_KEY); }catch(_){}
+  }
   function loadSettings(){
     try{
-      const saved = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null');
+      const saved = JSON.parse(readStoredSettings() || 'null');
       const merged = saved && typeof saved === 'object' ? {...SETTINGS_DEFAULTS, ...saved} : {...SETTINGS_DEFAULTS};
       if(!Object.prototype.hasOwnProperty.call(PROVIDER_DEFAULTS, merged.provider)) merged.provider = 'gemini';
       return merged;
@@ -1639,6 +1677,7 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     settingsBackendToken.type = 'password';
     settingsTokenToggle.textContent = t('settingsShowKey');
     settingsUseCustom.checked = !!tryonSettings.useCustom;
+    settingsSessionOnly.checked = !!tryonSettings.sessionOnly;
     settingsProvider.value = tryonSettings.provider || 'gemini';
     settingsBaseUrl.value = tryonSettings.baseUrl || '';
     settingsApiKey.value = tryonSettings.apiKey || '';
@@ -1857,16 +1896,17 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
       baseUrl,
       apiKey: isComfy ? '' : settingsApiKey.value.trim(),
       model: settingsModel.value.trim(),
+      sessionOnly: settingsSessionOnly.checked,
     };
     try{
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(tryonSettings));
+      persistSettings(tryonSettings);
     }catch(_){ setSettingsMessage(t('aiFailed')); return; }
     refreshConfigUI();
     setSettingsMessage(t('settingsSaved'), true);
     setTimeout(closeSettings, 350);
   });
   document.getElementById('settingsReset').addEventListener('click', ()=>{
-    try{ localStorage.removeItem(SETTINGS_KEY); }catch(_){}
+    clearStoredSettings();
     tryonSettings = {...SETTINGS_DEFAULTS};
     fillSettingsForm();
     refreshConfigUI();
