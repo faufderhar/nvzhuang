@@ -162,8 +162,10 @@ server {
 - **开启鉴权**：在 `manifest/config/config.yaml` 中配置 `security.authRequired: true`（本地调试可临时设为 `false`，公开部署必须为 `true`）。
 - **配置密钥**：在环境变量或 `.env` 文件中设置 `TRYON_API_KEYS`（多个 Token 用英文逗号分隔，每个 Token 须为 32 到 512 个字符）。
   ```bash
-  TRYON_API_KEYS="your-secure-token-with-at-least-32-chars-long-1234,another-client-token-5678"
+  # 每个客户端单独生成一个随机 Token
+  TRYON_API_KEYS="$(openssl rand -hex 32),$(openssl rand -hex 32)"
   ```
+- **拒绝示例值**：后端启动时会拒绝明显的示例/占位 Token（包含 `your-`、`example`、`placeholder`、`changeme` 等片段，或不同字符少于 10 种），请勿直接复制文档中的写法。
 - **脱敏安全存储**：后端仅在内存保存 Token 的 SHA-256 哈希摘要，比对使用恒定时间比对（Constant-Time Compare）防止时序侧信道攻击；日志、错误响应与响应头中绝不打印任何 Token 明文。
 - **前端配置**：用户可在前端「设置中心」的「试穿后端」区域填入「后端访问 Token」（与第三方模型 API Key 完全隔离独立存储）。发起请求时，前端自动在 Header 中注入 `Authorization: Bearer <token>`。
 

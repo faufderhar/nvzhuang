@@ -9,7 +9,7 @@ import (
 
 func TestTokenStoreValidation(t *testing.T) {
 	token1 := "12345678901234567890123456789012"     // 32 chars
-	token2 := "abcdefabcdefabcdefabcdefabcdefabcdef" // 36 chars
+	token2 := "abcdef0123456789abcdefabcdefabcdef12" // 36 chars
 
 	envKey := "TEST_TRYON_API_KEYS"
 	os.Setenv(envKey, token1+","+token2)
@@ -150,4 +150,29 @@ func TestConcurrencyManager(t *testing.T) {
 
 	release2()
 	release3()
+}
+
+// F-08：拒绝文档中的示例 Token 与低熵 Token
+func TestTokenStoreRejectsPlaceholders(t *testing.T) {
+	envKey := "TEST_TRYON_PLACEHOLDER_KEYS"
+	defer os.Unsetenv(envKey)
+	bad := []string{
+		"your-secret-backend-token-with-at-least-32-chars",
+		"another-backend-token-for-authorized-client-32",
+		"your-secure-token-with-at-least-32-chars-long-1234",
+		"changeme-changeme-changeme-changeme-0000",
+		"<generate with: openssl rand -hex 32 here>",
+		"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		"abababababababababababababababababababab",
+	}
+	for _, tok := range bad {
+		os.Setenv(envKey, tok)
+		if _, err := NewTokenStore(true, envKey); err == nil {
+			t.Errorf("placeholder token should be rejected: %q", tok)
+		}
+	}
+	os.Setenv(envKey, "3f9c1a7e5b2d8046c1e9a3b7d5f20864ae1c3b5d7f9e0a2c")
+	if _, err := NewTokenStore(true, envKey); err != nil {
+		t.Errorf("random token should be accepted: %v", err)
+	}
 }
