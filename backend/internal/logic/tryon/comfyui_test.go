@@ -32,7 +32,7 @@ func TestComfyUIGenerateFixedWorkflow(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var uploads atomic.Int32
+	var uploads, historyDeletes atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/system_stats":
@@ -43,9 +43,12 @@ func TestComfyUIGenerateFixedWorkflow(t *testing.T) {
 			if err := r.ParseMultipartForm(1 << 20); err != nil {
 				t.Errorf("parse multipart: %v", err)
 			}
+			if r.FormValue("type") != "temp" || r.FormValue("overwrite") == "true" {
+				t.Errorf("uploads must go to temp without overwrite, got type=%q overwrite=%q", r.FormValue("type"), r.FormValue("overwrite"))
+			}
 			count := uploads.Add(1)
 			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]interface{}{"name": "uploaded-" + string(rune('0'+count)) + ".png", "type": "input"})
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{"name": "uploaded-" + string(rune('0'+count)) + ".png", "subfolder": r.FormValue("subfolder"), "type": "temp"})
 		case r.URL.Path == "/prompt":
 			var request comfyPromptRequest
 			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -58,6 +61,9 @@ func TestComfyUIGenerateFixedWorkflow(t *testing.T) {
 			if person == "person" || garment == "garment" {
 				t.Error("uploaded image names were not bound into workflow")
 			}
+			if !strings.HasSuffix(person.(string), " [temp]") || !strings.HasPrefix(garment.(string), "tryon/") {
+				t.Errorf("uploaded images must be referenced via temp annotation, got %v / %v", person, garment)
+			}
 			if !strings.Contains(prompt, "subject_definitions:") || !strings.Contains(prompt, "retention_analysis:") || !strings.Contains(prompt, "Picture 1") || !strings.Contains(prompt, "Picture 2") {
 				t.Error("try-on prompt wrapper was not applied")
 			}
@@ -65,6 +71,8 @@ func TestComfyUIGenerateFixedWorkflow(t *testing.T) {
 				t.Errorf("unexpected fixed seed: %v", seed)
 			}
 			_, _ = io.WriteString(w, `{"prompt_id":"prompt-1","node_errors":{}}`)
+		case r.URL.Path == "/history" && r.Method == http.MethodPost:
+			historyDeletes.Add(1)
 		case r.URL.Path == "/history/prompt-1":
 			_, _ = io.WriteString(w, `{"prompt-1":{"outputs":{"5":{"images":[{"filename":"result.png","subfolder":"","type":"output"}]}},"status":{"completed":true,"status_str":"success"}}}`)
 		case r.URL.Path == "/view":
@@ -99,6 +107,9 @@ func TestComfyUIGenerateFixedWorkflow(t *testing.T) {
 	}
 	if uploads.Load() != 2 {
 		t.Fatalf("expected 2 uploads, got %d", uploads.Load())
+	}
+	if historyDeletes.Load() != 1 {
+		t.Fatalf("expected history cleanup after success, got %d", historyDeletes.Load())
 	}
 	decoded, err := base64.StdEncoding.DecodeString(result)
 	if err != nil {
