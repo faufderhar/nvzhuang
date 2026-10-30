@@ -5,6 +5,8 @@ import (
 	"net"
 	"strings"
 	"testing"
+
+	"backend/internal/imagevalidate"
 )
 
 func TestBuildPrompt(t *testing.T) {
@@ -84,15 +86,14 @@ func TestDecodeB64(t *testing.T) {
 
 func TestDoTryonValidation(t *testing.T) {
 	ctx := context.Background()
+	img := &imagevalidate.ValidatedImage{Data: []byte("x"), MIME: "image/png"}
 
-	// Empty person
-	_, _, _, err := DoTryon(ctx, "", "somegarment", "gemini", "1024x1536", "zh")
+	_, _, _, err := DoTryonWithValidatedImages(ctx, nil, img, "gemini", "1024x1536", "zh", nil)
 	if err == nil || !strings.Contains(err.Error(), "人像照片不能为空") {
 		t.Errorf("expected empty person error, got: %v", err)
 	}
 
-	// Empty garment
-	_, _, _, err = DoTryon(ctx, "someperson", "", "gemini", "1024x1536", "zh")
+	_, _, _, err = DoTryonWithValidatedImages(ctx, img, nil, "gemini", "1024x1536", "zh", nil)
 	if err == nil || !strings.Contains(err.Error(), "服装图不能为空") {
 		t.Errorf("expected empty garment error, got: %v", err)
 	}
@@ -131,7 +132,7 @@ func TestValidateClientModelConfig(t *testing.T) {
 }
 
 func TestClientConfigOverridesTopLevelModel(t *testing.T) {
-	validB64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+	img := &imagevalidate.ValidatedImage{Data: []byte("\x89PNG\r\n\x1a\n"), MIME: "image/png"}
 	clientConfig := &ModelConfig{
 		Provider: "unsupported",
 		APIKey:   "test-key",
@@ -139,8 +140,8 @@ func TestClientConfigOverridesTopLevelModel(t *testing.T) {
 		Model:    "gpt-image-2",
 	}
 
-	_, _, _, err := DoTryonWithClientConfig(
-		context.Background(), validB64, validB64, "gemini", "1024x1536", "zh", clientConfig,
+	_, _, _, err := DoTryonWithValidatedImages(
+		context.Background(), img, img, "gemini", "1024x1536", "zh", clientConfig,
 	)
 	if err == nil || !strings.Contains(err.Error(), "不支持的协议类型") {
 		t.Fatalf("expected client config validation to override the top-level gemini model, got: %v", err)

@@ -81,7 +81,8 @@ func (c *ControllerV1) Tryon(ctx context.Context, req *v1.TryonReq) (res *v1.Try
 	}
 	imageMIME, err := tryon.DetectGeneratedImageMIME(imageB64)
 	if err != nil {
-		return nil, err
+		// 上游返回了非图片内容：按上游失败处理，不回显内容
+		return nil, security.ErrUpstreamFailed
 	}
 	return &v1.TryonRes{
 		Image:  imageB64,

@@ -121,7 +121,7 @@ func (g *Gemini) Generate(ctx context.Context, personB64, garmentB64, prompt, si
 		return "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("Gemini API error (status %d): %s", resp.StatusCode, truncate(string(respBody), 500))
+		return "", fmt.Errorf("Gemini API error (status %d): %s", resp.StatusCode, truncate(string(respBody), 300))
 	}
 
 	var result geminiResponse

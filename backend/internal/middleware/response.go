@@ -28,7 +28,13 @@ func GenerateRequestID() string {
 	return fmt.Sprintf("%x%s", time.Now().UnixNano(), hex.EncodeToString(b))
 }
 
+// WriteAPIError 输出标准错误响应并终止后续处理。
 func WriteAPIError(r *ghttp.Request, err *security.APIError) {
+	writeAPIErrorBody(r, err)
+	r.ExitAll()
+}
+
+func writeAPIErrorBody(r *ghttp.Request, err *security.APIError) {
 	reqID := GetRequestID(r)
 	r.Response.Header().Set("Content-Type", "application/json; charset=utf-8")
 	if reqID != "" {
@@ -43,5 +49,4 @@ func WriteAPIError(r *ghttp.Request, err *security.APIError) {
 			"request_id": reqID,
 		},
 	})
-	r.ExitAll()
 }

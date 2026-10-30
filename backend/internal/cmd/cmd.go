@@ -87,7 +87,7 @@ func RegisterRoutes(s *ghttp.Server, secService *security.Service, maxBodyBytes 
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(
 			middleware.RequestID,
-			ghttp.MiddlewareHandlerResponse,
+			middleware.HandlerResponse,
 			corsMw.Handler,
 		)
 		group.Bind(hello.NewV1())

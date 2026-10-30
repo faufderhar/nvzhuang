@@ -102,7 +102,7 @@ func (d *Doubao) Generate(ctx context.Context, personB64, garmentB64, prompt, si
 		return "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("豆包 API 错误 (status %d): %s", resp.StatusCode, truncate(string(respBody), 500))
+		return "", fmt.Errorf("豆包 API 错误 (status %d): %s", resp.StatusCode, truncate(string(respBody), 300))
 	}
 
 	var result doubaoResponse
