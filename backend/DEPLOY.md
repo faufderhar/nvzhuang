@@ -5,7 +5,7 @@
 ## 一、前置条件
 
 - 一台能访问对应服务商的服务器（调国外模型需能访问 OpenAI / Google，用豆包等国内模型则只需能访问国内网络即可）
-- 服务器已安装 Go 1.18+ 或 Docker
+- 服务器已安装 Go 1.26+（`go.mod` 要求 go 1.26.0，依赖的安全版本需要）或 Docker
 - 已申请 API Key（按需，用哪个模型就配哪个；若使用本地 ComfyUI 则完全不需要申请 Key）：
   - OpenAI GPT-Image：`sk-...`（https://platform.openai.com）
   - 豆包（火山方舟）：`ARK...`（https://console.volcengine.com/ark）
@@ -34,6 +34,8 @@ docker compose logs -f
 ```
 
 > 说明：系统默认自动加载配置模板并绑定 `:8000` 端口。若需深度定制模型或路由，可复制配置：`cp manifest/config/config.example.yaml manifest/config/config.yaml`。
+>
+> 容器安全说明：镜像以非 root 用户（UID 10001）运行；`.dockerignore` 会排除 `config.yaml` 与 `.env`，自定义配置请按 `docker-compose.yml` 中注释以只读卷挂载，不要打进镜像。compose 默认只绑定 `127.0.0.1:8000`，并启用 `read_only`、`cap_drop: [ALL]` 与健康检查。容器内的 `127.0.0.1` 指向容器自身，访问宿主机 ComfyUI 请把 `baseURL` 改为 `http://host.docker.internal:8188`。
 
 ### 方式 B：Docker Run 单命令运行
 
@@ -43,8 +45,11 @@ cd backend
 docker build -f manifest/docker/Dockerfile -t costume-tryon .
 
 # 2. 运行容器，通过环境变量注入 Key（按需填写，豆包用 ARK_API_KEY）
+# 端口只绑定本机回环，由 Nginx 对外；以只读根文件系统、无 capability 方式运行
+# 如需自定义配置：-v "$PWD/manifest/config/config.yaml:/app/manifest/config/config.yaml:ro"
 docker run -d --name costume-tryon \
-  -p 8000:8000 \
+  -p 127.0.0.1:8000:8000 \
+  --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
   --restart unless-stopped \
   -e OPENAI_API_KEY="sk-你的key" \
   -e ARK_API_KEY="你的豆包ArkKey" \
@@ -142,17 +147,33 @@ server {
     ssl_certificate     /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
 
+    # 合并重复斜杠（//tryon → /tryon），与后端的路径规范化保持一致
+    merge_slashes on;
+
+    # 大图片 base64 请求体：需 ≥ 后端 security.maxRequestBodyBytes（默认 24 MiB）
+    client_max_body_size 30m;
+
     location / {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
+        # 用真实连接地址覆盖（而不是追加）客户端传入的 X-Forwarded-For / X-Real-IP，防止伪造 IP 绕过限流
         proxy_set_header X-Real-IP $remote_addr;
-        # 大图片 base64 请求体，调大超时和体积上限
-        client_max_body_size 30m;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 180s;
         proxy_send_timeout 180s;
     }
 }
 ```
+
+后端默认**只信任 TCP 连接的对端地址**，忽略 `X-Forwarded-For`。放在 Nginx 之后时，需要在 `config.yaml` 中声明可信代理，否则所有用户会共用 Nginx 的 IP 做限流与配额：
+
+```yaml
+security:
+  trustedProxies: ["127.0.0.1/32", "::1/128"]   # 同机 Nginx；Docker 网络内的代理请填写其网段，如 172.18.0.0/16
+```
+
+仅当请求来自 `trustedProxies` 中的地址时，后端才会从 `X-Forwarded-For` 中取最右侧的不可信地址作为客户端 IP。不要把 `0.0.0.0/0` 写进去。
 
 ## 五、安全与成本控制防护（公网部署必读）
 
@@ -175,7 +196,7 @@ server {
 
 ### 3. 频控限流、每日额度与并发锁定
 - **令牌桶速率限制**（默认 10 次/分，突发 3 次）：超出限制时立即拒绝并返回 HTTP 429（`42901`，`RATE_LIMITED`），并在响应头附带 `Retry-After` 秒数。
-- **每日生成额度**（默认每个调用方 100 次/天）：额度按 UTC 自然日重置；仅当请求通过全部鉴权与图片校验、即将进入模型生成时原子扣减；额度耗尽返回 HTTP 429（`42902`，`DAILY_QUOTA_EXCEEDED`）。*(注：首版配额计数器保存在进程内存中，后端重启会重置)*。
+- **每日生成额度**（默认每个调用方 100 次/天）：额度按 UTC 自然日重置；仅当请求通过全部鉴权、图片校验并成功占用并发槽位后才原子扣减，模型/参数配置错误（未调用上游）会退还额度；额度耗尽返回 HTTP 429（`42902`，`DAILY_QUOTA_EXCEEDED`）。*(注：首版配额计数器保存在进程内存中，后端重启会重置)*。
 - **并发控制**（全局最大 2 并发，单主体最大 1 并发）：超过并发上限时立即返回 HTTP 429（`42903`，`CONCURRENCY_LIMITED`），不排队阻塞服务器连接。
 
 ### 4. 请求体与图片安全限制
@@ -191,9 +212,41 @@ server {
 - Key 仅保存在服务器本地环境变量或 `.env`，禁止将包含真实 Key 的 `config.yaml` 或 `.env` 提交到公开仓库。
 - 默认的「服务器预设」模式下，前端不接触服务器 API Key，所有大模型通信均由后端代理中转。
 - 可选的「个人模型配置」由用户主动保存在自己的浏览器，并只随单次 `/tryon` 请求发送。后端不写数据库、配置文件或业务日志；Gemini Key 使用请求头传递，不进入上游 URL。
-- 个人 Base URL 默认拒绝 localhost、内网与保留地址，且不允许查询参数，避免公开后端被滥用为 SSRF 代理或把 Key 写入 URL。
+- 个人 Base URL 必须为 `https://`、端口只能是 443，不允许用户名密码、查询参数与片段；拒绝 localhost、内网、CGNAT（含云厂商元数据 100.100.100.200）、NAT64/6to4 等全部 IANA 特殊用途地址，并在建立连接时对 DNS 解析结果再次校验，避免公开后端被滥用为 SSRF 代理。
+- 上游重定向：模型接口只允许同协议同主机的重定向（最多 3 次），防止 `x-goog-api-key` 等自定义头被转发到其他主机；结果图片下载只允许 HTTPS。
+- 上游响应体积：模型响应上限 64 MiB，错误响应只读取前 4 KiB，视觉分析响应上限 1 MiB。
 
-### 6. 模型内容安全遵从
+### 6. 错误响应与日志脱敏
+- 上游模型失败统一返回 HTTP 502（`50201`，`UPSTREAM_FAILED`，“换装生成失败，请稍后重试”）并附带 `request_id`，不回显上游原始响应。
+- 参数校验错误返回 HTTP 400，未分类的内部错误返回 HTTP 500 固定文案；错误响应均为 JSON `{code, message, data}`。
+- 服务端日志只记录脱敏后的失败原因：Key（`sk-`、`AIza`、Bearer 等）、URL、IP 与长 base64 数据会被替换，并按 `request_id` 关联排查。
+- `X-Request-ID` 仅接受 1~64 位 `[A-Za-z0-9_-]`，否则由服务端重新生成。
+
+### 7. 数据流向说明
+- 「服务器预设」模式：用户照片只发送给 `config.yaml` 中配置的模型服务。
+- 「个人模型配置」模式：照片与 Key 只发送给用户自己填写的 Base URL。
+- **GPT Image 系列额外的视觉分析**：模型名或别名包含 `gpt-image` 时，后端会先把人像与服装图发送到**同一 Base URL** 下的轻量视觉模型（官方 OpenAI 为 `gpt-4o-mini`，其他中转站为 `gemini-3.5-flash-lite`）提取文字特征，再调用生图接口。因此同一张照片会产生两次上游调用，请确认你的服务商允许并知悉该用途。
+- 本地 ComfyUI：照片上传到 ComfyUI 主机（见下一节的清理说明）。
+
+### 8. ComfyUI 隐私与清理
+- 用户图片以 `type=temp` 上传到 ComfyUI 的 `temp/tryon/` 目录，文件名带随机 ID，不覆盖他人文件；ComfyUI **重启时会清空 temp 目录**。
+- 任务结束（成功、失败或客户端断开/超时）后，后端会删除该任务的 `/history` 记录；超时或断开时还会从队列删除任务，若正在执行则只中断该 `prompt_id`。
+- 工作流输出节点若为 `SaveImage`，结果图会写入 ComfyUI 的 `output/tryon/` 目录并**长期保留**。建议二选一：
+  1. 把输出节点改为 `PreviewImage`（写入 temp 目录，后端会自动跳过 `filename_prefix`）；
+  2. 在 ComfyUI 主机上定时清理，例如 `find /path/to/ComfyUI/output/tryon /path/to/ComfyUI/temp/tryon -type f -mmin +60 -delete`。
+- ComfyUI 本身没有鉴权，请只监听本机或内网地址，不要直接暴露到公网。
+
+### 9. 持续安全检查（建议接入 CI）
+```bash
+cd backend
+go vet ./... && go test -race ./...
+go install golang.org/x/vuln/cmd/govulncheck@latest && govulncheck ./...
+# 密钥扫描（仓库根目录）
+gitleaks detect --source . --redact
+node ../tests/frontend_tryon_test.mjs
+```
+
+### 10. 模型内容安全遵从
 各模型提供商（如 OpenAI、Google、火山引擎）对真人图像生成均有内容安全审核（Moderation），请遵守相关法律法规与平台服务条款，勿用于违背公序良俗的场景。
 
 ## 六、验证部署
@@ -212,7 +265,7 @@ curl -X POST https://api.你的域名/tryon \
   -H "Content-Type: application/json" \
   -d '{}'
 
-# 预期返回缺少参数验证错误：{"code":51,"message":"The PersonImage field is required","data":null}
+# 预期返回 HTTP 400 参数验证错误：{"code":51,"message":"The PersonImage field is required","data":{"request_id":"..."}}
 ```
 
 看到这个响应，说明后端已正常运行，即可在前端使用「AI 换装」。

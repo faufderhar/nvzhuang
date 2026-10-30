@@ -130,11 +130,13 @@ llm:
 ```bash
 # 1. 复制环境变量模板并填入你的 Key（如国内免翻墙的豆包 ARK_API_KEY，或 OpenAI Key）
 cp backend/.env.example backend/.env
+# 开启鉴权时，用随机值生成后端访问 Token 写入 TRYON_API_KEYS（示例/占位值会被后端拒绝）
+openssl rand -hex 32
 
 # 2. 一键启动后端（内置开箱即用兜底，默认监听 8000 端口）
 docker compose up -d
 
-# 服务启动后监听在 http://localhost:8000
+# 服务启动后监听在 http://127.0.0.1:8000（compose 默认只绑定本机回环，对外请用 Nginx 反向代理，见 backend/DEPLOY.md）
 ```
 
 > 提示：若需深度定制模型或高级路由，可复制配置文件模板：`cp backend/manifest/config/config.example.yaml backend/manifest/config/config.yaml`（未复制时系统也会自动使用模板并稳定监听 8000 端口）。
@@ -149,7 +151,7 @@ docker build -f manifest/docker/Dockerfile -t costume-tryon .
 
 # 运行容器（按需注入模型 Key，例如豆包或 OpenAI）
 docker run -d --name costume-tryon \
-  -p 8000:8000 \
+  -p 127.0.0.1:8000:8000 \
   -e ARK_API_KEY="你的豆包ArkKey" \
   -e OPENAI_API_KEY="sk-你的OpenAIKey" \
   costume-tryon
