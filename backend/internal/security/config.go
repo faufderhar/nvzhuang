@@ -34,7 +34,13 @@ type RateLimitConfig struct {
 type ConcurrencyConfig struct {
 	Global       int `json:"global"`
 	PerPrincipal int `json:"perPrincipal"`
+	// QueueTimeoutSeconds 全局并发已满时的最长排队秒数；0（默认）表示不排队、立即返回 429。
+	// 单主体超限始终立即拒绝。
+	QueueTimeoutSeconds int `json:"queueTimeoutSeconds"`
 }
+
+// MaxQueueTimeoutSeconds 排队等待上限，避免请求在后端长时间挂起。
+const MaxQueueTimeoutSeconds = 60
 
 func DefaultSecurityConfig() *SecurityConfig {
 	return &SecurityConfig{
@@ -106,6 +112,9 @@ func LoadSecurityConfig(ctx context.Context) (*SecurityConfig, error) {
 	}
 	if cfg.Concurrency.PerPrincipal <= 0 {
 		cfg.Concurrency.PerPrincipal = 1
+	}
+	if cfg.Concurrency.QueueTimeoutSeconds < 0 || cfg.Concurrency.QueueTimeoutSeconds > MaxQueueTimeoutSeconds {
+		return nil, fmt.Errorf("security.concurrency.queueTimeoutSeconds 必须在 0–%d 之间: %d", MaxQueueTimeoutSeconds, cfg.Concurrency.QueueTimeoutSeconds)
 	}
 
 	return cfg, nil

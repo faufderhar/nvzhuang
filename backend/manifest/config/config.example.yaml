@@ -107,6 +107,10 @@ logger:
 # apiKey / baseURL / model 全部可配；apiKey 也支持通过 envKey 指定的环境变量注入。
 # ============================================================================
 llm:
+  # 调用云端模型生成图片的 HTTP 总超时（秒，10–1800，默认 180）。
+  # 超时链路必须满足：反向代理读超时（Nginx proxy_read_timeout，建议 300s）> 本值 + 余量，
+  # 且 shutdown.timeoutSeconds ≥ 本值 + 5 秒，否则启动时打印配置警告。
+  requestTimeoutSeconds: 180
   models:
     # OpenAI GPT-Image-2（官方当前主推；gpt-image-1 已于 2026-10 停服）
     gpt-image:
@@ -220,8 +224,9 @@ security:
     limiterIdleMinutes: 30          # 限流器闲置自动清理周期（分钟）
     dailyRequestsPerPrincipal: 100  # 单调用方每日最高调用成功额度（自然日重置）
   concurrency:
-    global: 2                       # 全局最大生图并发数
+    global: 2                       # 全局最大生图并发数（4c24g 生产建议 6，配合 GOMEMLIMIT=2GiB、容器内存上限 3GiB）
     perPrincipal: 1                 # 单调用方最大生图并发数
+    queueTimeoutSeconds: 0          # 全局并发已满时的排队秒数（0–60）。0 为立即返回 429；生产建议 10。超时返回 429 并带 Retry-After
 
 # 请求体与图片安全限制
 upload:

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -65,6 +66,18 @@ var (
 
 			logictryon.SetClientAllowedPorts(secService.Config.ClientModelAllowedPorts)
 
+			modelTimeout, err := logictryon.LoadModelRequestTimeout(ctx)
+			if err != nil {
+				return err
+			}
+			logictryon.SetModelRequestTimeout(modelTimeout)
+			shutdownCfg := LoadShutdownConfig(ctx)
+			if msg := logictryon.CheckTimeoutBudget(modelTimeout, shutdownCfg.Timeout); msg != "" {
+				g.Log().Warning(ctx, "【配置警告】"+msg)
+			}
+			g.Log().Infof(ctx, "模型请求超时 %s；反向代理的读超时（如 Nginx proxy_read_timeout）必须大于该值，建议 ≥ %s",
+				modelTimeout, modelTimeout+2*time.Minute)
+
 			imgLimits := imagevalidate.LoadImageLimits(ctx)
 
 			probe := lifecycle.NewProbe()
@@ -77,7 +90,7 @@ var (
 
 			stop, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()
-			return Serve(stop, s, probe, LoadShutdownConfig(ctx))
+			return Serve(stop, s, probe, shutdownCfg)
 		},
 	}
 )

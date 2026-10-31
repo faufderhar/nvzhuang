@@ -48,3 +48,30 @@ func TestClientModelAllowedPortsRejectsInvalid(t *testing.T) {
 		}
 	}
 }
+
+func TestLoadSecurityConfigQueueTimeout(t *testing.T) {
+	ctx := context.Background()
+	old := g.Cfg().GetAdapter()
+	t.Cleanup(func() { g.Cfg().SetAdapter(old) })
+	for content, wantErr := range map[string]bool{
+		"security:\n  concurrency:\n    queueTimeoutSeconds: 10\n": false,
+		"security:\n  concurrency:\n    queueTimeoutSeconds: -1\n": true,
+		"security:\n  concurrency:\n    queueTimeoutSeconds: 61\n": true,
+	} {
+		a, err := gcfg.NewAdapterContent(content)
+		if err != nil {
+			t.Fatal(err)
+		}
+		g.Cfg().SetAdapter(a)
+		cfg, err := LoadSecurityConfig(ctx)
+		if (err != nil) != wantErr {
+			t.Fatalf("%q: err=%v", content, err)
+		}
+		if !wantErr && cfg.Concurrency.QueueTimeoutSeconds != 10 {
+			t.Fatalf("queueTimeoutSeconds 未生效: %+v", cfg.Concurrency)
+		}
+	}
+	if DefaultSecurityConfig().Concurrency.QueueTimeoutSeconds != 0 {
+		t.Fatal("默认不排队，保持旧行为")
+	}
+}
