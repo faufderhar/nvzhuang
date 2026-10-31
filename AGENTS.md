@@ -107,7 +107,8 @@ nvzhuang/
 ├── scripts/check.sh           # 本地质量门禁（AGENTS.md §3），.githooks/pre-commit 可选调用
 ├── docker-compose.yml         # 后端编排（仅绑定 127.0.0.1:8000、read_only、cap_drop）
 ├── deploy/                    # 生产叠加：docker-compose.prod.yml（Nginx 容器 + 固定网络 172.30.0.0/24）、nginx 模板与 JSON 错误页、
-│                              #   config.prod.overrides.yaml、.env.prod.example（仅占位值）、host/init-host.sh、nginx/smoke-test.sh
+│                              #   config.prod.overrides.yaml、.env.prod.example（仅占位值）、host/init-host.sh、nginx/smoke-test.sh、
+│                              #   verify.sh（上线验收）、FIRST-INSTALL.md（首次装机运行手册）
 ├── docs/                      # 审计结论、发布清单、需求与技术文档
 └── backend/
     ├── main.go                # 入口 → internal/cmd

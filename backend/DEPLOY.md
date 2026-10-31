@@ -277,7 +277,7 @@ node ../tests/frontend_tryon_test.mjs
 
 ## 五点八、生产部署（单台海外 VPS，推荐）
 
-推荐拓扑：前端静态站（GitHub Pages 等）→ `https://<API 域名>` → **Nginx 容器**（`172.30.0.2`，唯一对外的 80/443）→ **后端容器**（`172.30.0.10:8000`，不发布端口）→ 云端模型（Gemini / OpenAI 兼容，豆包可选）。ComfyUI 代码保留，但无 GPU 时不部署、`/readyz` 也不依赖它。配置文件与步骤见 [`deploy/README.md`](../deploy/README.md)，要点：
+推荐拓扑：前端静态站（GitHub Pages 等）→ `https://<API 域名>` → **Nginx 容器**（`172.30.0.2`，唯一对外的 80/443）→ **后端容器**（`172.30.0.10:8000`，不发布端口）→ 云端模型（Gemini / OpenAI 兼容，豆包可选）。ComfyUI 代码保留，但无 GPU 时不部署、`/readyz` 也不依赖它。配置文件与步骤见 [`deploy/README.md`](../deploy/README.md)；**首次装机**请按 [`deploy/FIRST-INSTALL.md`](../deploy/FIRST-INSTALL.md) 逐步执行（可直接交给 AI，含验收脚本 `deploy/verify.sh` 与完成定义）。要点：
 
 - **鉴权**：熟人使用也要开启 `authRequired: true`，每人一个随机 Token（`openssl rand -hex 32`），通过 `TRYON_API_KEYS` 注入；
 - **可信代理**：`trustedProxies: ["172.30.0.2/32"]`，不要写 `127.0.0.1` / 网关 / 整个 Docker 网段（见第四节说明）；
@@ -287,15 +287,18 @@ node ../tests/frontend_tryon_test.mjs
 - **额度持久化**：`stateDir: /app/data`（compose 的 `tryon-state` 卷），重启后每日额度不清零；
 - **容量**：4c24g 建议全局并发 6、排队 10s、`GOMEMLIMIT=2GiB`、容器 3 GiB 上限（见第五节第 3 条的实测数据）。
 
-上线后核对：
+- **Key 注入**：Token 与模型 Key 只写根目录 `.env`，compose 必须同时传 `--env-file .env --env-file deploy/.env.prod`（只传后者时，基础文件 `environment:` 里的 `${OPENAI_API_KEY:-}` 等会被插值为空并覆盖 `env_file`）；`config.yaml` 权限 `root:10001 0640`。
+
+上线后核对（完整验收用 `deploy/verify.sh --local`）：
 
 ```bash
+dc() { docker compose -p nvzhuang --env-file .env --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml "$@"; }
 # 1. 后端没有对外端口（只应看到 Nginx 的 80/443）
-docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml ps
+dc ps
 # 2. 探针（在服务器本机经 Nginx 访问；外网访问 /healthz、/readyz 会被拒绝）
-curl -sk --resolve <API 域名>:443:127.0.0.1 https://<API 域名>/readyz
+curl -s --resolve <API 域名>:443:127.0.0.1 https://<API 域名>/readyz
 # 3. 客户端 IP 识别正确：后端日志中不应出现“部署告警”；Nginx 访问日志中应是真实客户端地址
-docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml logs costume-tryon | grep 部署告警 || echo OK
+dc logs costume-tryon | grep 部署告警 || echo OK
 # 4. 伪造的 X-Forwarded-For 不生效：从外网带 -H 'X-Forwarded-For: 1.2.3.4' 连续请求，仍会按你的真实地址限流
 ```
 
@@ -315,7 +318,7 @@ curl -X POST https://api.你的域名/tryon \
   -H "Content-Type: application/json" \
   -d '{}'
 
-# 预期返回 HTTP 400 参数验证错误：{"code":51,"message":"The PersonImage field is required","data":{"request_id":"..."}}
+# 预期返回 HTTP 400 参数验证错误：{"code":51,"message":"The person_image field is required","data":{"request_id":"..."}}
 
 # 就绪探针（在服务器本机执行；未配置任何云端模型 Key 时返回 503）
 curl -s http://127.0.0.1:8000/readyz

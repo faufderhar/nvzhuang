@@ -1,7 +1,9 @@
 # 生产叠加配置（单台 4c24g 海外 VPS，拓扑：Nginx 容器 → 后端容器，后端不发布任何端口）
 # 用法（在仓库根目录执行；叠加文件中的相对路径均相对仓库根目录解析）：
 #   cp deploy/.env.prod.example deploy/.env.prod   # 填入你自己的域名与证书路径（不要提交）
-#   docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d
+#   docker compose -p nvzhuang --env-file .env --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d
+# 根目录 .env（Token 与模型 Key）必须作为第一个 --env-file：否则基础文件 environment 中的 ${OPENAI_API_KEY:-} 等会被插值为空并覆盖 env_file。
+# 首次装机完整步骤见 deploy/FIRST-INSTALL.md。
 # 需要 Docker Compose v2.24+（使用 !reset 清除基础文件里的端口发布）。
 services:
   costume-tryon:
