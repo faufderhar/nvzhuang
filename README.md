@@ -191,7 +191,7 @@ docker run -d --name costume-tryon \
    - 单图上限 8 MiB、两图合计 16 MiB、长宽限制 256~8192 px、总像素严格限制在 2000 万以内（防止解压像素炸弹导致服务器 OOM）；
    - 前端上传照片时自适应缩放：任一边小于 256 px 时自动等比放大到合规尺寸，高清模式最长边 2048 px，并阶梯压缩（WebP 优先，质量 0.90~0.75）。
 
-> 完整的多模型接入、生产环境 Nginx 反代与安全加固说明见 [`backend/DEPLOY.md`](backend/DEPLOY.md)。
+> 完整的多模型接入、生产环境 Nginx 反代与安全加固说明见 [`backend/DEPLOY.md`](backend/DEPLOY.md)；服务器首次装机（可直接交给 AI 执行并自动验收）见 [`deploy/FIRST-INSTALL.md`](deploy/FIRST-INSTALL.md)。
 
 ## 🚀 前端本地启动
 
@@ -217,7 +217,7 @@ nvzhuang/
 ├── data.js             # 1407 条服装数据（id / 分类 / 关键词 / 图片路径）
 ├── config.js           # 可选部署期配置（默认为空，可设置 window.AI_API_URL）
 ├── docker-compose.yml  # 一键启动后端 Docker 容器编排（仅绑定 127.0.0.1:8000）
-├── deploy/             # 生产叠加配置：Nginx 容器、JSON 错误页、主机初始化脚本（见 deploy/README.md）
+├── deploy/             # 生产叠加配置：Nginx 容器、JSON 错误页、主机初始化脚本、验收脚本 verify.sh、首次装机手册 FIRST-INSTALL.md（见 deploy/README.md）
 ├── scripts/check.sh    # 本地质量门禁（提交前运行）
 ├── tests/              # 前端 Node 测试
 ├── assets/
