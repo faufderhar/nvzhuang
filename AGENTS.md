@@ -91,7 +91,7 @@ git config core.hooksPath .githooks   # 可选：启用提交前钩子自动运�
 
 ## 5. 项目概览与目录
 
-女装穿搭图鉴静态站（纯前端，可直接部署到 GitHub Pages）+ 可选的 AI 换装后端（GoFrame v2.7.1）。
+女装穿搭图鉴静态站（纯前端，可直接部署到 GitHub Pages）+ 可选的 AI 换装后端（GoFrame v2.10.4）。
 
 ```
 nvzhuang/

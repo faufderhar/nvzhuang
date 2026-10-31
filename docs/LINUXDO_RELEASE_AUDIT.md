@@ -20,7 +20,7 @@
 | **文档一致性** | 主 README、后端 README、DEPLOY.md 均已对齐，统一支持 GPT Image 2、豆包 Seedream、Gemini 及 Docker 部署。 | **PASSED** | 统一了模型名称与协议描述。 |
 | **密钥安全性** | `config.yaml` 均包含在 `.gitignore` 中，仅保留 `config.example.yaml` 与 `.env.example`；提交历史与代码中无硬编码真实 Key（2026-10-30 复核：正则命中均为 go.sum 哈希或文档占位符的误报）。`.env.example` 已不再提供可直接使用的占位 Token，后端拒绝示例值。 | **PASSED** | 建议在 CI 中接入 gitleaks。 |
 | **后端接口安全** | 2026-10-30 深度审计发现路径变体绕过鉴权（`//tryon`）、SSRF 黑名单不全、上游错误回显、XFF 伪造绕过限流等 27 项问题，已在 `fix/audit-2026-10-30` 分支逐项修复并补充回归测试。 | **PENDING** | 待所有者审阅并合并该分支；ComfyUI temp 上传/中断清理需在真实 ComfyUI 上验证一次。 |
-| **依赖漏洞** | 修复前 govulncheck 报告 5 个可达漏洞（x/image WebP、otel）；升级后 `govulncheck ./...` 结果为 No vulnerabilities found。go 指令升级为 1.26.0。 | **PENDING** | 合并后在 CI 中持续运行 govulncheck；GoFrame 仍为 v2.7.1，升级 v2.10 需单独评估。 |
+| **依赖漏洞** | 修复前 govulncheck 报告 5 个可达漏洞（x/image WebP、otel）；升级后 `govulncheck ./...` 结果为 No vulnerabilities found。go 指令升级为 1.26.0。 | **DONE** | GoFrame 已升级至 v2.10.4（2026-10-31，冒烟检查：双斜杠路由鉴权、413 JSON、错误码脱敏、接口文档默认关闭）；govulncheck 由本地 `scripts/check.sh` 每次提交前运行（不使用云端 CI）。 |
 
 ---
 
