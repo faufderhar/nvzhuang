@@ -16,18 +16,21 @@ import (
 type Doubao struct {
 	apiKey  string
 	baseURL string
-	model   string
-	name    string
-	client  *http.Client
+	// resultOrigin 服务端配置时为 Base URL 的 origin，结果图片与其同源时允许下载内网/非 443 地址。
+	resultOrigin string
+	model        string
+	name         string
+	client       *http.Client
 }
 
 func NewDoubao(cfg *ModelConfig) *Doubao {
 	return &Doubao{
-		apiKey:  cfg.APIKey,
-		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
-		model:   cfg.Model,
-		name:    cfg.Name,
-		client:  newModelHTTPClient(cfg.ClientProvided),
+		apiKey:       cfg.APIKey,
+		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
+		resultOrigin: trustedResultOrigin(cfg),
+		model:        cfg.Model,
+		name:         cfg.Name,
+		client:       newModelHTTPClient(cfg.ClientProvided),
 	}
 }
 
@@ -128,7 +131,7 @@ func (d *Doubao) Generate(ctx context.Context, personB64, garmentB64, prompt, si
 
 // downloadImage 下载 URL 图片并转 base64
 func (d *Doubao) downloadImage(ctx context.Context, url string) (string, error) {
-	return downloadResultImage(ctx, url)
+	return downloadResultImage(ctx, url, d.resultOrigin)
 }
 
 // normalizeDoubaoSize 把 OpenAI 风格的尺寸转成豆包支持的像素格式
