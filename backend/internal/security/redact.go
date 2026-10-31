@@ -12,6 +12,9 @@ var redactPatterns = []struct {
 	// 常见 API Key / Token 形态
 	{regexp.MustCompile(`(?i)\bbearer\s+[A-Za-z0-9._~+/=-]+`), "Bearer [REDACTED]"},
 	{regexp.MustCompile(`\bsk-[A-Za-z0-9_*.-]{6,}`), "[REDACTED_KEY]"},
+	// 紧贴在其它字母数字之后的长密钥（如 "xsk-..."）没有单词边界，单独兜底
+	{regexp.MustCompile(`sk-[A-Za-z0-9_-]{20,}`), "[REDACTED_KEY]"},
+	{regexp.MustCompile(`AIza[A-Za-z0-9_-]{20,}`), "[REDACTED_KEY]"},
 	{regexp.MustCompile(`\bAIza[A-Za-z0-9_*-]{10,}`), "[REDACTED_KEY]"},
 	{regexp.MustCompile(`(?i)\b(api[_-]?key|access[_-]?key|secret|token|password|authorization|x-goog-api-key)(["'\s:=]+)[^\s"',;&]+`), "$1$2[REDACTED]"},
 	// URL（可能包含用户自定义 Base URL 或带签名的结果地址）
@@ -27,15 +30,8 @@ var redactPatterns = []struct {
 // 并额外替换调用方明确传入的敏感值（如本次请求的 API Key），最后截断到 300 字符。
 // 返回值只用于日志，绝不回显给客户端。
 func RedactSecrets(s string, sensitive ...string) string {
-	for _, v := range sensitive {
-		v = strings.TrimSpace(v)
-		if len(v) >= 4 {
-			s = strings.ReplaceAll(s, v, "[REDACTED]")
-		}
-	}
-	for _, p := range redactPatterns {
-		s = p.re.ReplaceAllString(s, p.repl)
-	}
+	// 先清理控制字符再匹配，避免 "sk-12\x0034..." 这类被控制字符打断的密钥
+	// 在正则匹配后才被拼接成完整密钥写入日志。
 	s = strings.Map(func(r rune) rune {
 		if r == '\r' || r == '\n' || r == '\t' {
 			return ' '
@@ -45,6 +41,15 @@ func RedactSecrets(s string, sensitive ...string) string {
 		}
 		return r
 	}, s)
+	for _, v := range sensitive {
+		v = strings.TrimSpace(v)
+		if len(v) >= 4 {
+			s = strings.ReplaceAll(s, v, "[REDACTED]")
+		}
+	}
+	for _, p := range redactPatterns {
+		s = p.re.ReplaceAllString(s, p.repl)
+	}
 	const maxLen = 300
 	if len(s) > maxLen {
 		cut := maxLen
