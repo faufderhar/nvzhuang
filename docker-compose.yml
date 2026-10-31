@@ -21,9 +21,11 @@ services:
     # 使用 http://host.docker.internal:8188（并让 ComfyUI 监听宿主机可达的地址）。
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # 如需使用自定义配置，取消注释以只读方式挂载（不要把 config.yaml 打进镜像）
-    # volumes:
-    #   - ./backend/manifest/config/config.yaml:/app/manifest/config/config.yaml:ro
+    volumes:
+      # 每日额度持久化（config.yaml 中设置 security.stateDir: "/app/data" 后生效，未设置时不写入任何文件）
+      - tryon-state:/app/data
+      # 如需使用自定义配置，取消注释以只读方式挂载（不要把 config.yaml 打进镜像）
+      # - ./backend/manifest/config/config.yaml:/app/manifest/config/config.yaml:ro
     # 优雅停机：后端收到 SIGTERM 后最多等待 3 + 190 秒让在途换装请求完成，这里给足 200 秒
     stop_grace_period: 200s
     healthcheck:
@@ -44,3 +46,6 @@ services:
       - ARK_API_KEY=${ARK_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+
+volumes:
+  tryon-state:

@@ -82,6 +82,7 @@ var (
 
 			probe := lifecycle.NewProbe()
 			DefaultReadinessChecks(probe)
+			AddQuotaStateCheck(probe, secService.DailyQuotaTracker)
 
 			s := g.Server()
 			EnsureServerPort(ctx, s)
@@ -90,7 +91,11 @@ var (
 
 			stop, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 			defer cancel()
-			return Serve(stop, s, probe, shutdownCfg)
+			return Serve(stop, s, probe, shutdownCfg, func() {
+				if store := secService.DailyQuotaTracker.Store(); store != nil {
+					_ = store.Close()
+				}
+			})
 		},
 	}
 )

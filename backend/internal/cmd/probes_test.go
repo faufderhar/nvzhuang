@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"sync/atomic"
 	"testing"
@@ -15,6 +16,7 @@ import (
 	"github.com/gogf/gf/v2/os/gcfg"
 
 	"backend/internal/lifecycle"
+	"backend/internal/security"
 )
 
 type probeBody struct {
@@ -191,5 +193,35 @@ func TestProbesCoexistWithProtectedRoutes(t *testing.T) {
 	}
 	if code, _ := doReq(t, http.MethodPost, base+"/tryon", nil, nil); code != http.StatusUnauthorized {
 		t.Fatalf("/tryon 仍应需要鉴权: %d", code)
+	}
+}
+
+func TestQuotaStateReadinessCheck(t *testing.T) {
+	ctx := context.Background()
+	tracker := security.NewDailyQuotaTracker(1)
+	probe := lifecycle.NewProbe()
+	AddQuotaStateCheck(probe, tracker)
+	if ok, checks := probe.Ready(ctx); !ok {
+		t.Fatalf("纯内存模式应就绪: %v", checks)
+	}
+	dir := t.TempDir()
+	store, err := security.NewBoltQuotaStore(dir, 200*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tracker.SetStore(store)
+	if ok, checks := probe.Ready(ctx); !ok {
+		t.Fatalf("存储可用应就绪: %v", checks)
+	}
+	// 让数据库文件变为目录，模拟存储不可用
+	if err := os.Remove(store.Path()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(store.Path(), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	ok, checks := probe.Ready(ctx)
+	if ok || checks["state"] == "" || checks["state"] == "ok" {
+		t.Fatalf("存储不可用应未就绪: %v", checks)
 	}
 }

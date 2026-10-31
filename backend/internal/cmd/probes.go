@@ -12,6 +12,7 @@ import (
 	"backend/internal/lifecycle"
 	logictryon "backend/internal/logic/tryon"
 	"backend/internal/middleware"
+	"backend/internal/security"
 )
 
 // RegisterProbes 注册存活与就绪探针。两者都不经过鉴权和限流、不调用任何付费上游，
@@ -57,6 +58,20 @@ func DefaultReadinessChecks(probe *lifecycle.Probe) {
 	probe.AddCheck("models", func(ctx context.Context) error {
 		if len(logictryon.ConfiguredCloudModels(ctx)) == 0 {
 			return errors.New("no cloud model configured")
+		}
+		return nil
+	})
+}
+
+// AddQuotaStateCheck 在启用额度持久化时检查存储可用性；纯内存模式视为就绪。
+func AddQuotaStateCheck(probe *lifecycle.Probe, tracker *security.DailyQuotaTracker) {
+	probe.AddCheck("state", func(ctx context.Context) error {
+		store := tracker.Store()
+		if store == nil {
+			return nil
+		}
+		if err := store.Ping(); err != nil {
+			return errors.New("quota store unavailable")
 		}
 		return nil
 	})
