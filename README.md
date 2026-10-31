@@ -216,7 +216,10 @@ nvzhuang/
 ├── index.html          # 页面结构 + 样式 + 交互逻辑（含双语字典、AI 试穿搭配台）
 ├── data.js             # 1407 条服装数据（id / 分类 / 关键词 / 图片路径）
 ├── config.js           # 可选部署期配置（默认为空，可设置 window.AI_API_URL）
-├── docker-compose.yml  # 一键启动后端 Docker 容器编排
+├── docker-compose.yml  # 一键启动后端 Docker 容器编排（仅绑定 127.0.0.1:8000）
+├── deploy/             # 生产叠加配置：Nginx 容器、JSON 错误页、主机初始化脚本（见 deploy/README.md）
+├── scripts/check.sh    # 本地质量门禁（提交前运行）
+├── tests/              # 前端 Node 测试
 ├── assets/
 │   ├── thumbs/         # 缩略图（webp，网格卡片用）
 │   └── img/            # 展示图（webp，弹窗放大用）
@@ -226,7 +229,8 @@ nvzhuang/
 │   ├── .env.example                       # 环境变量示例文件
 │   ├── restart.bat / build.bat            # Windows 本地一键启动/重新编译脚本
 │   ├── manifest/config/config.yaml        # 模型配置（Key / BaseURL / 模型名）
-│   ├── internal/logic/tryon/              # 模型适配器（openai / doubao / gemini）
+│   ├── internal/logic/tryon/              # 模型适配器（openai / doubao / gemini / comfyui）与 netguard.go 出站安全
+│   ├── workflows/                         # ComfyUI API 工作流（可选，本地 GPU 部署时使用）
 │   └── DEPLOY.md                          # 部署指南
 └── .gitignore
 ```

@@ -275,6 +275,30 @@ node ../tests/frontend_tryon_test.mjs
 - 不再使用 GoFrame 自带的信号处理：实测其收到 SIGTERM 后会立即中断在途的换装请求（`gracefulTimeout` 默认仅 2 秒）。
 - `docker-compose.yml` 已设置 `stop_grace_period: 200s`；`docker stop` / `docker run` 请相应使用 `-t 200`（`--stop-timeout 200`），否则 Docker 默认 10 秒后强杀。`shutdown.timeoutSeconds` 必须大于模型请求超时。
 
+## 五点八、生产部署（单台海外 VPS，推荐）
+
+推荐拓扑：前端静态站（GitHub Pages 等）→ `https://<API 域名>` → **Nginx 容器**（`172.30.0.2`，唯一对外的 80/443）→ **后端容器**（`172.30.0.10:8000`，不发布端口）→ 云端模型（Gemini / OpenAI 兼容，豆包可选）。ComfyUI 代码保留，但无 GPU 时不部署、`/readyz` 也不依赖它。配置文件与步骤见 [`deploy/README.md`](../deploy/README.md)，要点：
+
+- **鉴权**：熟人使用也要开启 `authRequired: true`，每人一个随机 Token（`openssl rand -hex 32`），通过 `TRYON_API_KEYS` 注入；
+- **可信代理**：`trustedProxies: ["172.30.0.2/32"]`，不要写 `127.0.0.1` / 网关 / 整个 Docker 网段（见第四节说明）；
+- **超时链**：模型 180s < Nginx `proxy_read_timeout` 300s；停机 `timeoutSeconds` 190s ≥ 模型 + 5s；`stop_grace_period` 200s ≥ drainDelay + 停机超时；
+- **请求缓冲**：Nginx `proxy_request_buffering on` + `client_max_body_size 30m`，慢速上传不会占用后端并发槽；
+- **安全头**：HSTS、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、API 响应 `Content-Security-Policy: default-src 'none'`，并隐藏 Nginx 版本；
+- **额度持久化**：`stateDir: /app/data`（compose 的 `tryon-state` 卷），重启后每日额度不清零；
+- **容量**：4c24g 建议全局并发 6、排队 10s、`GOMEMLIMIT=2GiB`、容器 3 GiB 上限（见第五节第 3 条的实测数据）。
+
+上线后核对：
+
+```bash
+# 1. 后端没有对外端口（只应看到 Nginx 的 80/443）
+docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml ps
+# 2. 探针（在服务器本机经 Nginx 访问；外网访问 /healthz、/readyz 会被拒绝）
+curl -sk --resolve <API 域名>:443:127.0.0.1 https://<API 域名>/readyz
+# 3. 客户端 IP 识别正确：后端日志中不应出现“部署告警”；Nginx 访问日志中应是真实客户端地址
+docker compose -f docker-compose.yml -f deploy/docker-compose.prod.yml logs costume-tryon | grep 部署告警 || echo OK
+# 4. 伪造的 X-Forwarded-For 不生效：从外网带 -H 'X-Forwarded-For: 1.2.3.4' 连续请求，仍会按你的真实地址限流
+```
+
 ## 六、验证部署
 
 部署后测试（若开启了鉴权，请带上 `Authorization: Bearer <token>`）：
@@ -295,6 +319,8 @@ curl -X POST https://api.你的域名/tryon \
 
 # 就绪探针（在服务器本机执行；未配置任何云端模型 Key 时返回 503）
 curl -s http://127.0.0.1:8000/readyz
+# 使用 deploy/ 生产叠加时后端不发布端口，改为经 Nginx 在本机访问：
+# curl -sk --resolve <API 域名>:443:127.0.0.1 https://<API 域名>/readyz
 ```
 
 看到这个响应，说明后端已正常运行，即可在前端使用「AI 换装」。

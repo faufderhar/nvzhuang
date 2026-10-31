@@ -175,4 +175,5 @@ nvzhuang/
 
 - 2026-10-30：深度代码审计，发现 27 项（1 严重、2 高危），修复后合并为 PR #1。
 - 2026-10-31：合并后复审，修复结果图下载回归、新增 `clientModelAllowedPorts`、日志脱敏绕过、错误前缀、前端错误映射与 `-count` 测试不稳定，合并为 PR #2。
+- 2026-10-31：优化方案 v2 阶段 1（本地分支，未推送）：本地门禁 `scripts/check.sh`、GoFrame 2.10.4、探针与优雅停机、模型超时与并发排队、每日额度 bbolt 持久化、中文搜索召回、前端小改进（记录保留/Retry-After/语言记忆/config.js）、生产 `deploy/` 叠加配置（Nginx 容器、trustedProxies /32 与超时链一致性测试）、部署文档。
 - 参考：`backend/DEPLOY.md`（部署、Nginx、安全与数据流向）、`docs/LINUXDO_RELEASE_AUDIT.md`（审计结论）、`docs/LINUXDO_PUBLISH_CHECKLIST.md`、`docs/2026-10-30_security-image-validation-requirements.md`、`README.md`。
