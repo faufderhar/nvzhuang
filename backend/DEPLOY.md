@@ -160,8 +160,10 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 180s;
-        proxy_send_timeout 180s;
+        # 必须大于后端模型请求超时 llm.requestTimeoutSeconds（默认 180 秒）+ 余量，
+        # 否则慢请求会被 Nginx 提前断开（返回 504），而后端仍在消耗上游额度
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
     }
 }
 ```
@@ -197,7 +199,9 @@ security:
 ### 3. 频控限流、每日额度与并发锁定
 - **令牌桶速率限制**（默认 10 次/分，突发 3 次）：超出限制时立即拒绝并返回 HTTP 429（`42901`，`RATE_LIMITED`），并在响应头附带 `Retry-After` 秒数。
 - **每日生成额度**（默认每个调用方 100 次/天）：额度按 UTC 自然日重置；仅当请求通过全部鉴权、图片校验并成功占用并发槽位后才原子扣减，模型/参数配置错误（未调用上游）会退还额度；额度耗尽返回 HTTP 429（`42902`，`DAILY_QUOTA_EXCEEDED`）。*(注：首版配额计数器保存在进程内存中，后端重启会重置)*。
-- **并发控制**（全局最大 2 并发，单主体最大 1 并发）：超过并发上限时立即返回 HTTP 429（`42903`，`CONCURRENCY_LIMITED`），不排队阻塞服务器连接。
+- **并发控制**（全局最大 2 并发，单主体最大 1 并发）：默认超过并发上限时立即返回 HTTP 429（`42903`，`CONCURRENCY_LIMITED`，附 `Retry-After: 5`）。设置 `security.concurrency.queueTimeoutSeconds`（0–60，生产建议 10）后，全局已满的请求会先排队等待，超时再返回 429；同一调用方超限始终立即拒绝，排队人数不超过全局并发数的 2 倍，客户端断开即放弃排队。
+- **超时链路**：`llm.requestTimeoutSeconds`（默认 180 秒）是调用云端模型的 HTTP 总超时；反向代理读超时必须更大（Nginx 示例为 300 秒），`shutdown.timeoutSeconds`（默认 190 秒）必须至少大 5 秒，否则启动时打印配置警告。
+- **容量参考（4c24g 单机）**：`concurrency.global: 6`，容器设置 `GOMEMLIMIT=2GiB` 与 3 GiB 内存上限。内存主要来自请求体解析、Base64 解码与图片解码：本地实测单个接近上限（约 20 MB）的请求峰值 RSS 约 230 MiB；`global: 6` 且排队请求也已读入请求体时，18 个同时到达的大请求在 `GOMEMLIMIT=2GiB` 下峰值 RSS 约 1.9 GiB。因此必须同时设置 `GOMEMLIMIT` 与容器内存上限，且不要把 `global` 调得更高。
 
 ### 4. 请求体与图片安全限制
 - **请求体体积**：HTTP 请求体上限默认限制为 24 MiB（`maxRequestBodyBytes: 25165824`），超限在 JSON 解析前直接截断返回 HTTP 413（`41301`，`REQUEST_TOO_LARGE`）。

@@ -7,6 +7,8 @@ package tryon
 import (
 	"context"
 	"errors"
+	"strconv"
+	"time"
 
 	"github.com/gogf/gf/v2/errors/gcode"
 	"github.com/gogf/gf/v2/errors/gerror"
@@ -20,6 +22,9 @@ import (
 )
 
 type ControllerV1 struct{}
+
+// ConcurrencyRetryAfterSeconds 并发已满（含排队超时）时建议客户端的重试间隔。
+const ConcurrencyRetryAfterSeconds = 5
 
 func NewV1() *ControllerV1 {
 	return &ControllerV1{}
@@ -46,9 +51,12 @@ func (c *ControllerV1) Tryon(ctx context.Context, req *v1.TryonReq) (res *v1.Try
 		principalID = "anonymous"
 	}
 
-	// 2. 先占用并发槽位：被并发限制拒绝的请求不应消耗每日额度
-	release, ok := secService.ConcurrencyManager.Acquire(principalID)
+	// 2. 先占用并发槽位：被并发限制拒绝的请求不应消耗每日额度。
+	//    全局已满时按 security.concurrency.queueTimeoutSeconds 短暂排队（客户端断开即放弃）。
+	queueWait := time.Duration(secService.Config.Concurrency.QueueTimeoutSeconds) * time.Second
+	release, ok := secService.ConcurrencyManager.AcquireWait(ctx, principalID, queueWait)
 	if !ok {
+		r.Response.Header().Set("Retry-After", strconv.Itoa(ConcurrencyRetryAfterSeconds))
 		middleware.WriteAPIError(r, security.ErrConcurrencyLimited)
 		return nil, nil
 	}

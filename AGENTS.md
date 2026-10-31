@@ -150,7 +150,8 @@ nvzhuang/
 ## 8. 关键配置项（`backend/manifest/config/config.example.yaml`）
 
 - `security.authRequired` / `apiKeysEnv`（默认 `TRYON_API_KEYS`）/ `trustedOrigins` / `allowPrivateNetwork` / `trustedProxies` / `clientModelAllowedPorts`。
-- `security.rateLimit`：`requestsPerMinute`、`burst`、`limiterIdleMinutes`、`dailyRequestsPerPrincipal`；`security.concurrency`：`global`、`perPrincipal`。
+- `security.rateLimit`：`requestsPerMinute`、`burst`、`limiterIdleMinutes`、`dailyRequestsPerPrincipal`；`security.concurrency`：`global`、`perPrincipal`、`queueTimeoutSeconds`（默认 0 不排队，最大 60；排队超时与并发拒绝返回 429 + `Retry-After: 5`）。
+- `llm.requestTimeoutSeconds`：云端模型 HTTP 总超时（默认 180，10–1800）；必须小于反向代理读超时（Nginx 建议 300s）且比 `shutdown.timeoutSeconds` 至少小 5 秒。
 - `shutdown.drainDelaySeconds`（默认 3）/ `shutdown.timeoutSeconds`（默认 190，须大于模型请求超时）。
 - `upload.*`：请求体上限（默认 24 MiB，超限统一 413 JSON）、单图编码/解码大小、合计大小、宽高与像素上限、允许 MIME（jpeg/png/webp）。
 - `llm.models.<name>`：`provider`（openai/doubao/gemini/comfyui）、`apiKey` 或 `envKey`、`baseURL`、`model`、ComfyUI 的 `workflowPath`。模板中的密钥必须为空或占位。
