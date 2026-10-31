@@ -12,6 +12,7 @@ import (
 	"backend/internal/controller/hello"
 	"backend/internal/controller/tryon"
 	"backend/internal/imagevalidate"
+	logictryon "backend/internal/logic/tryon"
 	"backend/internal/middleware"
 	"backend/internal/security"
 )
@@ -58,6 +59,8 @@ var (
 			if err != nil {
 				return err
 			}
+
+			logictryon.SetClientAllowedPorts(secService.Config.ClientModelAllowedPorts)
 
 			imgLimits := imagevalidate.LoadImageLimits(ctx)
 
