@@ -48,7 +48,7 @@ docker build -f manifest/docker/Dockerfile -t costume-tryon .
 # 端口只绑定本机回环，由 Nginx 对外；以只读根文件系统、无 capability 方式运行
 # 如需自定义配置：-v "$PWD/manifest/config/config.yaml:/app/manifest/config/config.yaml:ro"
 docker run -d --name costume-tryon \
-  -p 127.0.0.1:8000:8000 \
+  -p 127.0.0.1:8000:8000 --stop-timeout 200 \
   --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges \
   --restart unless-stopped \
   -e OPENAI_API_KEY="sk-你的key" \
@@ -250,6 +250,15 @@ node ../tests/frontend_tryon_test.mjs
 ### 10. 模型内容安全遵从
 各模型提供商（如 OpenAI、Google、火山引擎）对真人图像生成均有内容安全审核（Moderation），请遵守相关法律法规与平台服务条款，勿用于违背公序良俗的场景。
 
+## 五点五、探针与优雅停机
+
+- `GET /healthz`：存活探针，进程存活即返回 `200 {"status":"ok"}`；镜像 `HEALTHCHECK` 与 compose 健康检查使用它。
+- `GET /readyz`：就绪探针，以下条件全部满足才返回 200，否则 503：配置已加载、至少一个**云端模型**已配置 Key（ComfyUI 不计入，其可用性见 `/comfyui/health`）、状态存储可用、且未进入停机流程。响应体只包含每项的 `ok` / `fail` / `draining`，不含错误细节。
+- 两个探针都不鉴权、不限流、不调用任何付费上游；公网部署时请在 Nginx 中只允许内网或监控节点访问（`/hello` 保留兼容旧的探测配置）。
+- 收到 `SIGTERM` / `SIGINT` 后：`/readyz` 立即返回 503 → 等待 `shutdown.drainDelaySeconds`（默认 3 秒，期间仍处理新请求）→ 停止接收新连接并等待在途请求完成，最多 `shutdown.timeoutSeconds`（默认 190 秒）→ 关闭状态存储并退出。
+- 不再使用 GoFrame 自带的信号处理：实测其收到 SIGTERM 后会立即中断在途的换装请求（`gracefulTimeout` 默认仅 2 秒）。
+- `docker-compose.yml` 已设置 `stop_grace_period: 200s`；`docker stop` / `docker run` 请相应使用 `-t 200`（`--stop-timeout 200`），否则 Docker 默认 10 秒后强杀。`shutdown.timeoutSeconds` 必须大于模型请求超时。
+
 ## 六、验证部署
 
 部署后测试（若开启了鉴权，请带上 `Authorization: Bearer <token>`）：
@@ -267,6 +276,9 @@ curl -X POST https://api.你的域名/tryon \
   -d '{}'
 
 # 预期返回 HTTP 400 参数验证错误：{"code":51,"message":"The PersonImage field is required","data":{"request_id":"..."}}
+
+# 就绪探针（在服务器本机执行；未配置任何云端模型 Key 时返回 503）
+curl -s http://127.0.0.1:8000/readyz
 ```
 
 看到这个响应，说明后端已正常运行，即可在前端使用「AI 换装」。

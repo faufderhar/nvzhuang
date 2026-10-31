@@ -104,13 +104,14 @@ nvzhuang/
 ├── docs/                      # 审计结论、发布清单、需求与技术文档
 └── backend/
     ├── main.go                # 入口 → internal/cmd
-    ├── api/{hello,tryon}/v1   # 请求/响应结构与路由元数据（/hello、POST /tryon、GET /comfyui/health）
+    ├── api/{hello,tryon}/v1   # 请求/响应结构与路由元数据（/hello、POST /tryon、GET /comfyui/health；/healthz、/readyz 在 cmd/probes.go）
     ├── internal/cmd           # 启动：配置回退、:8000 兜底、RegisterRoutes 中间件装配
     ├── internal/controller    # 控制器：参数与图片校验、并发槽与每日额度（调用上游前失败会退还）
     ├── internal/logic/tryon   # 模型适配（openai 兼容/gpt-image、doubao、gemini、comfyui）、提示词、netguard.go 出站安全
     ├── internal/middleware    # RequestID、HandlerResponse、CORS、BodyLimit、Auth、RateLimit、ClientIP、路径规范化
     ├── internal/security      # 安全配置、Token 存储、限流/配额/并发、标准错误码、日志脱敏 RedactSecrets
     ├── internal/imagevalidate # Data URL 解析与图片真实格式/尺寸/像素/大小校验
+    ├── internal/lifecycle     # /healthz、/readyz 就绪检查项与优雅停机参数（cmd.Serve 负责信号与停机流程）
     ├── manifest/config        # config.example.yaml（入库模板）；config.yaml（本地，已忽略）
     ├── manifest/docker/Dockerfile  # golang:1.26-alpine 构建，alpine:3.22 运行，非 root、HEALTHCHECK
     ├── workflows/             # ComfyUI API 工作流 JSON
@@ -144,11 +145,13 @@ nvzhuang/
 8. **Token**：只保存 SHA-256 并恒定时间比较；启动时拒绝示例/占位与低熵 Token，`authRequired: true` 且无有效 Token 时启动失败。
 9. **CORS**：`security.trustedOrigins` 精确匹配白名单，禁止 `*`，响应带 `Vary: Origin`。
 10. **暴露面**：Swagger/OpenAPI 默认关闭；compose 仅绑定 `127.0.0.1:8000`，容器非 root、只读根文件系统；保留 `config.example.yaml` 回退与 `:8000` 兜底。
+11. **探针与停机**：`/healthz`、`/readyz` 不鉴权，因此绝不调用付费上游、不返回错误细节；停机由 `cmd.Serve` 处理（readyz 先失败 → drainDelay → 等待在途请求最多 `shutdown.timeoutSeconds`），不得改回 GoFrame 默认信号处理（会中断在途请求）。
 
 ## 8. 关键配置项（`backend/manifest/config/config.example.yaml`）
 
 - `security.authRequired` / `apiKeysEnv`（默认 `TRYON_API_KEYS`）/ `trustedOrigins` / `allowPrivateNetwork` / `trustedProxies` / `clientModelAllowedPorts`。
 - `security.rateLimit`：`requestsPerMinute`、`burst`、`limiterIdleMinutes`、`dailyRequestsPerPrincipal`；`security.concurrency`：`global`、`perPrincipal`。
+- `shutdown.drainDelaySeconds`（默认 3）/ `shutdown.timeoutSeconds`（默认 190，须大于模型请求超时）。
 - `upload.*`：请求体上限（默认 24 MiB，超限统一 413 JSON）、单图编码/解码大小、合计大小、宽高与像素上限、允许 MIME（jpeg/png/webp）。
 - `llm.models.<name>`：`provider`（openai/doubao/gemini/comfyui）、`apiKey` 或 `envKey`、`baseURL`、`model`、ComfyUI 的 `workflowPath`。模板中的密钥必须为空或占位。
 

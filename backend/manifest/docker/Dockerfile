@@ -28,5 +28,7 @@ COPY workflows workflows/
 USER app:app
 EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1:8000/hello || exit 1
+    CMD wget -q -O /dev/null http://127.0.0.1:8000/healthz || exit 1
+# 收到 SIGTERM 后优雅停机（见 config.example.yaml 的 shutdown 段），编排侧 stop timeout 需 ≥ 200 秒
+STOPSIGNAL SIGTERM
 CMD ["./main"]

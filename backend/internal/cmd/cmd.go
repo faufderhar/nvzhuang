@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"context"
+	"os/signal"
+	"syscall"
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
@@ -12,6 +14,7 @@ import (
 	"backend/internal/controller/hello"
 	"backend/internal/controller/tryon"
 	"backend/internal/imagevalidate"
+	"backend/internal/lifecycle"
 	logictryon "backend/internal/logic/tryon"
 	"backend/internal/middleware"
 	"backend/internal/security"
@@ -64,11 +67,17 @@ var (
 
 			imgLimits := imagevalidate.LoadImageLimits(ctx)
 
+			probe := lifecycle.NewProbe()
+			DefaultReadinessChecks(probe)
+
 			s := g.Server()
 			EnsureServerPort(ctx, s)
+			RegisterProbes(s, probe)
 			RegisterRoutes(s, secService, imgLimits.MaxRequestBodyBytes)
-			s.Run()
-			return nil
+
+			stop, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+			defer cancel()
+			return Serve(stop, s, probe, LoadShutdownConfig(ctx))
 		},
 	}
 )
