@@ -79,6 +79,17 @@ const run = (code, globals = {}) => {
   assert.equal(getErrorMessageFromResponse(resp(504), null).code, 'GATEWAY_TIMEOUT');
   assert.equal(getErrorMessageFromResponse(resp(502), null).code, 'GATEWAY_ERROR');
   assert.equal(getErrorMessageFromResponse(resp(413), null).code, 'REQUEST_TOO_LARGE');
+  // 生产 Nginx JSON 错误页：直接读取仓库内的 deploy/nginx/errors/*.json，确保前后端约定一致
+  const nginxPages = { 413: 'REQUEST_TOO_LARGE', 429: 'RATE_LIMITED', 502: 'GATEWAY_ERROR', 504: 'GATEWAY_TIMEOUT' };
+  for (const [status, want] of Object.entries(nginxPages)) {
+    const body = JSON.parse(fs.readFileSync(new URL(`../deploy/nginx/errors/${status}.json`, import.meta.url), 'utf8'));
+    assert.equal(body.data.error_code, want, `${status}.json error_code`);
+    const got = getErrorMessageFromResponse(resp(Number(status), status === '429' ? '10' : null), body);
+    assert.equal(got.code, want, `nginx ${status}.json 映射`);
+    assert.ok(!got.text.includes(body.message), `nginx ${status}.json 不应拼接网关原文`);
+    if (status === '429') assert.equal(got.retryAfter, 10);
+  }
+  assert.match(getErrorMessageFromResponse(resp(503), { code: 50200, message: 'x', data: { error_code: 'GATEWAY_ERROR' } }).text, /HTTP 503/);
 }
 
 // i18n 新文案中英齐全

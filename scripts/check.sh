@@ -119,6 +119,13 @@ for t in "${fe_tests[@]}"; do
   node "$t"
 done
 
+step "Nginx 模板冒烟（可选）"
+if [[ -n "${NGINX_BIN:-}" ]] || command -v nginx >/dev/null 2>&1; then
+  deploy/nginx/smoke-test.sh
+else
+  echo "（未找到 nginx，跳过；可设置 NGINX_BIN 指向 nginx 可执行文件）"
+fi
+
 step "Shell 脚本语法检查"
 mapfile -t sh_files < <(git ls-files --cached --others --exclude-standard -- '*.sh' '.githooks/*')
 for f in "${sh_files[@]}"; do

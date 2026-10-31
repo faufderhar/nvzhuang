@@ -12,6 +12,7 @@ desktop.ini
 .env
 .env.*
 !.env.example
+!.env.prod.example
 *.pem
 *.key
 id_rsa*
@@ -22,3 +23,6 @@ id_rsa*
 config.yaml
 **/config/config.yaml
 *.log
+
+# 生产部署：ACME 校验目录（运行时生成）
+deploy/nginx/acme/

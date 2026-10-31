@@ -1,9 +1,13 @@
 package middleware
 
 import (
+	"context"
 	"net/netip"
 	"strings"
+	"sync/atomic"
+	"time"
 
+	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
 )
 
@@ -19,6 +23,10 @@ func ClientIP(r *ghttp.Request, trustedProxies []netip.Prefix) string {
 	}
 	remoteAddr = remoteAddr.Unmap()
 	if !inPrefixes(remoteAddr, trustedProxies) {
+		if (remoteAddr.IsPrivate() || remoteAddr.IsLoopback()) &&
+			(r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Real-IP") != "") {
+			maybeWarnUntrustedProxy(r.Context(), remoteAddr)
+		}
 		return remoteAddr.String()
 	}
 
@@ -50,4 +58,28 @@ func inPrefixes(addr netip.Addr, prefixes []netip.Prefix) bool {
 		}
 	}
 	return false
+}
+
+// untrustedProxyWarnInterval 同一进程内告警的最小间隔，避免被请求刷屏。
+const untrustedProxyWarnInterval = 10 * time.Minute
+
+var (
+	lastUntrustedProxyWarn atomic.Int64
+	// untrustedProxyWarnFunc 便于测试替换；只记录对端地址，绝不记录转发头内容。
+	untrustedProxyWarnFunc = func(ctx context.Context, peer netip.Addr) {
+		g.Log().Warningf(ctx, "【部署告警】收到来自私有地址 %s 的 X-Forwarded-For/X-Real-IP，但该地址不在 security.trustedProxies 中，"+
+			"限流与额度将按该代理地址统计（所有用户共享同一额度）。若这是你的反向代理，请把它加入 trustedProxies"+
+			"（Docker 部署注意：宿主机 Nginx 访问发布端口时对端通常是 Docker 网桥网关，而不是 127.0.0.1）", peer)
+	}
+)
+
+func maybeWarnUntrustedProxy(ctx context.Context, peer netip.Addr) {
+	now := time.Now().UnixNano()
+	last := lastUntrustedProxyWarn.Load()
+	if last != 0 && time.Duration(now-last) < untrustedProxyWarnInterval {
+		return
+	}
+	if lastUntrustedProxyWarn.CompareAndSwap(last, now) {
+		untrustedProxyWarnFunc(ctx, peer)
+	}
 }

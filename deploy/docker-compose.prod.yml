@@ -1,0 +1,88 @@
+# 生产叠加配置（单台 4c24g 海外 VPS，拓扑：Nginx 容器 → 后端容器，后端不发布任何端口）
+# 用法（在仓库根目录执行；叠加文件中的相对路径均相对仓库根目录解析）：
+#   cp deploy/.env.prod.example deploy/.env.prod   # 填入你自己的域名与证书路径（不要提交）
+#   docker compose --env-file deploy/.env.prod -f docker-compose.yml -f deploy/docker-compose.prod.yml up -d
+# 需要 Docker Compose v2.24+（使用 !reset 清除基础文件里的端口发布）。
+services:
+  costume-tryon:
+    # 后端只在内部网络可达；对外流量必须经过 Nginx
+    ports: !reset []
+    networks:
+      nvzhuang:
+        ipv4_address: 172.30.0.10
+    environment:
+      - GF_SERVER_ADDRESS=:8000
+      # 与容器内存上限配合：GC 在接近 2 GiB 时更积极回收（本地实测 18 个 20 MB 大请求峰值约 1.9 GiB）
+      - GOMEMLIMIT=2GiB
+    mem_limit: 3g
+    memswap_limit: 3g
+    cpus: 3.0
+    pids_limit: 256
+    volumes:
+      - tryon-state:/app/data
+      # 生产配置：以 deploy/backend/config.prod.overrides.yaml 为准修改 config.yaml 后只读挂载
+      - ${NVZHUANG_CONFIG_PATH:?请在 .env.prod 中设置 NVZHUANG_CONFIG_PATH}:/app/manifest/config/config.yaml:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  nginx:
+    image: nginx:1.28-alpine
+    container_name: costume-tryon-nginx
+    restart: unless-stopped
+    depends_on:
+      costume-tryon:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      nvzhuang:
+        ipv4_address: 172.30.0.2
+    environment:
+      - API_SERVER_NAME=${API_SERVER_NAME:?请在 .env.prod 中设置 API_SERVER_NAME}
+      - TLS_CERT_PATH=${TLS_CERT_PATH:?请在 .env.prod 中设置 TLS_CERT_PATH}
+      - TLS_KEY_PATH=${TLS_KEY_PATH:?请在 .env.prod 中设置 TLS_KEY_PATH}
+      # 只替换以下变量，避免误伤 $remote_addr 等 Nginx 变量
+      - NGINX_ENVSUBST_FILTER=^(API_SERVER_NAME|TLS_CERT_PATH|TLS_KEY_PATH)$
+    volumes:
+      - ./deploy/nginx/templates:/etc/nginx/templates:ro
+      - ./deploy/nginx/errors:/etc/nginx/errors:ro
+      - ${TLS_DIR:?请在 .env.prod 中设置 TLS_DIR}:${TLS_DIR}:ro
+      - ${ACME_WEBROOT:-./deploy/nginx/acme}:/var/www/acme:ro
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx
+      - /var/run
+      - /etc/nginx/conf.d
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+      - CHOWN
+      - SETUID
+      - SETGID
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "--no-check-certificate", "https://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+networks:
+  nvzhuang:
+    driver: bridge
+    ipam:
+      config:
+        # 固定子网与地址：后端 trustedProxies 只信任 Nginx 的 /32，避免信任整个 Docker 网桥
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1

@@ -173,10 +173,16 @@ server {
 
 ```yaml
 security:
-  trustedProxies: ["127.0.0.1/32", "::1/128"]   # 同机 Nginx；Docker 网络内的代理请填写其网段，如 172.18.0.0/16
+  trustedProxies: ["127.0.0.1/32", "::1/128"]   # 仅适用于 Nginx 直接装在宿主机、后端以非 Docker 方式运行
 ```
 
 仅当请求来自 `trustedProxies` 中的地址时，后端才会从 `X-Forwarded-For` 中取最右侧的不可信地址作为客户端 IP。不要把 `0.0.0.0/0` 写进去。
+
+> **Docker 部署注意**：后端在容器内看到的对端是代理容器地址（或绕过代理时的 Docker 网桥网关），不是 `127.0.0.1`。请给代理固定 IP，并且只信任它的 `/32`，**不要信任整个 Docker 网段或网关**。生产推荐直接使用 `deploy/` 下的叠加配置（Nginx 容器 `172.30.0.2`，`trustedProxies: ["172.30.0.2/32"]`，后端不发布端口），详见 [`deploy/README.md`](../deploy/README.md)。后端若收到来自不可信私网/回环对端、却带有 `X-Forwarded-For`/`X-Real-IP` 的请求，会每 10 分钟最多记录一条告警（只含对端地址），提示检查此项配置。
+>
+> Docker 发布的端口会绕过 ufw 等主机防火墙，生产环境不要给后端发布端口。
+
+生产 Nginx 模板（`deploy/nginx/templates/nvzhuang.conf.template`）在 Nginx 自身拦截请求时返回与后端同结构的 JSON：413 → `41300 REQUEST_TOO_LARGE`、429 → `42900 RATE_LIMITED`（`Retry-After: 10`）、502/503 → `50200 GATEWAY_ERROR`、504 → `50400 GATEWAY_TIMEOUT`；后端返回的 JSON 错误原样透传。
 
 ## 五、安全与成本控制防护（公网部署必读）
 

@@ -216,7 +216,7 @@ security:
     - "http://localhost:3000"
     - "http://127.0.0.1:3000"
   allowPrivateNetwork: false        # 是否允许来自私有网络的 PNA 预检
-  trustedProxies: []                # 可信反向代理 IP/CIDR（如 ["127.0.0.1"]）。仅这些地址转发的 X-Forwarded-For 才会被采信；为空时只用 TCP 对端地址做限流
+  trustedProxies: []                # 可信反向代理 IP/CIDR（宿主机 Nginx 填 ["127.0.0.1/32"]；Docker 部署只填代理容器的 /32，如 deploy/ 中的 ["172.30.0.2/32"]，不要填网关或整个网段）。仅这些地址转发的 X-Forwarded-For 才会被采信；为空时只用 TCP 对端地址做限流
   clientModelAllowedPorts: [443]    # 浏览器自定义模型 Base URL 允许的 HTTPS 端口（默认仅 443）。中转站使用 8443 等端口时可追加，仍强制 HTTPS 与公网地址校验
   stateDir: ""                      # 每日额度持久化目录（bbolt 单文件 quota.db，只存主体哈希与计数）。为空表示纯内存、重启清零；Docker 生产建议 "/app/data"（配合 compose 的 tryon-state 卷）。目录不可用时启动失败
   rateLimit:
