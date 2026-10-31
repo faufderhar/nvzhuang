@@ -283,7 +283,7 @@ node ../tests/frontend_tryon_test.mjs
 - **可信代理**：`trustedProxies: ["172.30.0.2/32"]`，不要写 `127.0.0.1` / 网关 / 整个 Docker 网段（见第四节说明）；
 - **超时链**：模型 180s < Nginx `proxy_read_timeout` 300s；停机 `timeoutSeconds` 190s ≥ 模型 + 5s；`stop_grace_period` 200s ≥ drainDelay + 停机超时；
 - **请求缓冲**：Nginx `proxy_request_buffering on` + `client_max_body_size 30m`，慢速上传不会占用后端并发槽；
-- **安全头**：HSTS、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、API 响应 `Content-Security-Policy: default-src 'none'`，并隐藏 Nginx 版本；
+- **安全头**：HSTS、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、`Permissions-Policy`、API 响应 `Content-Security-Policy: default-src 'none'`，并隐藏 Nginx 版本；
 - **额度持久化**：`stateDir: /app/data`（compose 的 `tryon-state` 卷），重启后每日额度不清零；
 - **容量**：4c24g 建议全局并发 6、排队 10s、`GOMEMLIMIT=2GiB`、容器 3 GiB 上限（见第五节第 3 条的实测数据）。
 
