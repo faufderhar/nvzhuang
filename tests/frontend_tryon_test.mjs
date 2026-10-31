@@ -48,6 +48,8 @@ const helperNames = [
   'createResultImageDataUrl',
   'parseTryonResponse',
   'getErrorMessageFromResponse',
+  'isLoopbackHost',
+  'validCustomModelBaseUrl',
 ];
 
 const translations = {
@@ -67,12 +69,16 @@ const translations = {
   errRateLimited: 'rate limited',
   errDailyQuotaExceeded: 'quota exceeded',
   errConcurrencyLimited: 'concurrency limited',
+  errUpstreamFailed: 'upstream failed',
+  errInternal: 'internal error',
+  errInvalidRequest: 'invalid request',
   settingsBackendOutdated: 'backend outdated',
 };
 
 const context = {
   atob,
   Uint8Array,
+  URL,
   tryonSettings: {useCustom: false},
   t: key => translations[key] || key,
 };
@@ -131,11 +137,29 @@ assert.match(context.getErrorMessageFromResponse({status: 200, ok: true}, null).
   assert.match(handler, /fetch\(backendUrl \+ '\/comfyui\/health', \{headers:healthHeaders\}\)/);
 }
 
-// 后端上游失败返回 502 JSON 固定文案（F-03/F-24）：前端应展示该文案，而不是通用网关错误
+// 后端固定错误码按界面语言映射，不再拼接成“换装失败：换装生成失败”这类重复文案
 {
-  const msg = context.getErrorMessageFromResponse({status: 502, ok: false},
+  const upstream = context.getErrorMessageFromResponse({status: 502, ok: false},
     {code: 50201, message: '换装生成失败，请稍后重试', data: {error_code: 'UPSTREAM_FAILED', request_id: 'r1'}});
-  assert.match(msg.text, /换装生成失败/);
+  assert.equal(upstream.code, 'UPSTREAM_FAILED');
+  assert.equal(upstream.text, 'upstream failed');
+  const internal = context.getErrorMessageFromResponse({status: 500, ok: false},
+    {code: 50001, message: '服务内部错误，请稍后重试', data: {error_code: 'INTERNAL_ERROR'}});
+  assert.equal(internal.text, 'internal error');
+  // 400 校验错误仍展示后端的具体原因
+  const bad = context.getErrorMessageFromResponse({status: 400, ok: false}, {code: 51, message: 'Base URL 必须使用 HTTPS'});
+  assert.match(bad.text, /Base URL 必须使用 HTTPS/);
+}
+
+// 个人模型 Base URL：仅公网 HTTPS，与后端 client_config 校验一致
+{
+  assert.equal(context.validCustomModelBaseUrl('https://api.example.com/v1'), true);
+  assert.equal(context.validCustomModelBaseUrl('https://relay.example.com:8443/v1'), true);
+  assert.equal(context.validCustomModelBaseUrl('http://api.example.com/v1'), false);
+  assert.equal(context.validCustomModelBaseUrl('https://localhost/v1'), false);
+  assert.equal(context.validCustomModelBaseUrl('https://127.0.0.1/v1'), false);
+  assert.equal(context.validCustomModelBaseUrl('https://u:p@api.example.com/v1'), false);
+  assert.equal(context.validCustomModelBaseUrl('not a url'), false);
 }
 
 // F-17：内容安全策略

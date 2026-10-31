@@ -19,19 +19,22 @@ import (
 type OpenAIImages struct {
 	apiKey  string
 	baseURL string
-	model   string
-	name    string
-	client  *http.Client
+	// resultOrigin 服务端配置时为 Base URL 的 origin，结果图片与其同源时允许下载内网/非 443 地址。
+	resultOrigin string
+	model        string
+	name         string
+	client       *http.Client
 }
 
 // NewOpenAIImages 从配置创建适配器
 func NewOpenAIImages(cfg *ModelConfig) *OpenAIImages {
 	return &OpenAIImages{
-		apiKey:  cfg.APIKey,
-		baseURL: strings.TrimRight(cfg.BaseURL, "/"),
-		model:   cfg.Model,
-		name:    cfg.Name,
-		client:  newModelHTTPClient(cfg.ClientProvided),
+		apiKey:       cfg.APIKey,
+		baseURL:      strings.TrimRight(cfg.BaseURL, "/"),
+		resultOrigin: trustedResultOrigin(cfg),
+		model:        cfg.Model,
+		name:         cfg.Name,
+		client:       newModelHTTPClient(cfg.ClientProvided),
 	}
 }
 
@@ -265,7 +268,7 @@ func (o *OpenAIImages) Generate(ctx context.Context, personB64, garmentB64, prom
 
 // downloadImage 下载 URL 图片并转 base64（部分服务商只返回 URL）
 func (o *OpenAIImages) downloadImage(ctx context.Context, url string) (string, error) {
-	return downloadResultImage(ctx, url)
+	return downloadResultImage(ctx, url, o.resultOrigin)
 }
 
 // ensureBase64 兼容：如果传入的是 data URL，去掉前缀

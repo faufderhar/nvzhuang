@@ -170,12 +170,67 @@ func TestModelResponseIsBounded(t *testing.T) {
 // 结果图片 URL 只允许 HTTPS 公网地址
 func TestDownloadResultImageRejectsUnsafeURL(t *testing.T) {
 	for _, raw := range []string{"http://cdn.example.com/a.png", "https://cdn.example.com:8443/a.png", "file:///etc/passwd", "https://127.0.0.1/a.png"} {
-		if _, err := downloadResultImage(context.Background(), raw); err == nil {
+		if _, err := downloadResultImage(context.Background(), raw, ""); err == nil {
 			t.Errorf("expected %s to be rejected", raw)
 		}
 	}
 	r, _ := http.NewRequest(http.MethodGet, "http://cdn.example.com/a.png", nil)
 	if err := checkDownloadRedirect(r, []*http.Request{r}); err == nil {
 		t.Fatal("download redirect to http should be refused")
+	}
+}
+
+// 服务端配置的 Base URL 可信：上游返回与其同源（可为内网、http、非 443）的结果地址时允许下载
+func TestDownloadResultImageTrustedOrigin(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			t.Error("result download must not carry auth headers")
+		}
+		_, _ = w.Write([]byte("png-bytes"))
+	}))
+	defer srv.Close()
+
+	serverCfg := &ModelConfig{Provider: "openai", BaseURL: srv.URL + "/v1"}
+	origin := trustedResultOrigin(serverCfg)
+	if origin == "" {
+		t.Fatal("server-configured base URL should yield a trusted origin")
+	}
+	got, err := downloadResultImage(context.Background(), srv.URL+"/files/img.png", origin)
+	if err != nil {
+		t.Fatalf("same-origin result from server-configured provider should download: %v", err)
+	}
+	if got != encodeB64([]byte("png-bytes")) {
+		t.Fatalf("unexpected payload %q", got)
+	}
+
+	// 浏览器配置不信任任何 origin，同样的地址必须被拒绝
+	clientCfg := &ModelConfig{Provider: "openai", BaseURL: srv.URL + "/v1", ClientProvided: true}
+	if o := trustedResultOrigin(clientCfg); o != "" {
+		t.Fatalf("client-provided config must not be trusted, got %q", o)
+	}
+	if _, err := downloadResultImage(context.Background(), srv.URL+"/files/img.png", ""); err == nil {
+		t.Fatal("loopback http result must be rejected for client-provided config")
+	}
+	// 与可信 origin 不同源（端口不同）的内网地址仍按不可信处理
+	if _, err := downloadResultImage(context.Background(), "http://127.0.0.1:1/a.png", origin); err == nil {
+		t.Fatal("other-origin intranet result must be rejected")
+	}
+}
+
+func TestURLOrigin(t *testing.T) {
+	cases := map[string]string{
+		"https://API.Example.com/v1":   "https://api.example.com:443",
+		"https://api.example.com:443/": "https://api.example.com:443",
+		"http://10.0.0.5:3000/v1":      "http://10.0.0.5:3000",
+		"http://relay.local/v1":        "http://relay.local:80",
+		"http://[fd00::1]:8080/":       "http://[fd00::1]:8080",
+		"https://u:p@api.example.com/": "",
+		"ftp://api.example.com/":       "",
+		"":                             "",
+	}
+	for in, want := range cases {
+		if got := urlOrigin(in); got != want {
+			t.Errorf("urlOrigin(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

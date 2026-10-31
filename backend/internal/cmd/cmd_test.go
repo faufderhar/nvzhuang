@@ -10,7 +10,7 @@ import (
 
 func TestEnsureServerPort(t *testing.T) {
 	ctx := context.Background()
-	s := g.Server("test_port_server")
+	s := g.Server(uniqueServerName("test_port_server"))
 	EnsureServerPort(ctx, s)
 
 	// 当未配置自定义端口时，经过 EnsureServerPort 校验，端口应稳定为 8000

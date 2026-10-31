@@ -26,7 +26,7 @@ func TestCORSOriginValidation(t *testing.T) {
 	cors := NewCORSMiddleware(cfg)
 
 	// 1. 白名单 Origin
-	s := g.Server("test-cors-allowed")
+	s := g.Server(uniqueServerName("test-cors-allowed"))
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(RequestID, cors.Handler)
 		group.ALL("/test", func(r *ghttp.Request) {
@@ -113,7 +113,7 @@ func TestAuthMiddleware(t *testing.T) {
 	}
 	authMw := NewAuthMiddleware(store)
 
-	s := g.Server("test-auth-mw")
+	s := g.Server(uniqueServerName("test-auth-mw"))
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(RequestID, authMw.Handler)
 		group.POST("/tryon", func(r *ghttp.Request) {
@@ -186,7 +186,7 @@ func TestAuthMiddleware(t *testing.T) {
 func TestBodyLimitMiddleware(t *testing.T) {
 	limitMw := NewBodyLimitMiddleware(100) // 100 bytes limit
 
-	s := g.Server("test-body-limit")
+	s := g.Server(uniqueServerName("test-body-limit"))
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(RequestID, limitMw.Handler)
 		group.POST("/tryon", func(r *ghttp.Request) {
@@ -228,7 +228,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 	limiter := security.NewRateLimiter(60, 1, 10) // 1 burst
 	rlMw := NewRateLimitMiddleware(limiter)
 
-	s := g.Server("test-rate-limit-mw")
+	s := g.Server(uniqueServerName("test-rate-limit-mw"))
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(RequestID, rlMw.Handler)
 		group.POST("/tryon", func(r *ghttp.Request) {
@@ -304,7 +304,7 @@ func TestSanitizeRequestID(t *testing.T) {
 }
 
 func TestRequestIDMiddlewareRegenerates(t *testing.T) {
-	s := g.Server("test-request-id")
+	s := g.Server(uniqueServerName("test-request-id"))
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(RequestID)
 		group.ALL("/x", func(r *ghttp.Request) { r.Response.Write(GetRequestID(r)) })
@@ -341,7 +341,7 @@ func TestRequestIDMiddlewareRegenerates(t *testing.T) {
 
 func TestCORSVaryOrigin(t *testing.T) {
 	cors := NewCORSMiddleware(&security.SecurityConfig{TrustedOrigins: []string{"http://localhost:3000"}})
-	s := g.Server("test-cors-vary")
+	s := g.Server(uniqueServerName("test-cors-vary"))
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(RequestID, cors.Handler)
 		group.ALL("/x", func(r *ghttp.Request) { r.Response.Write("ok") })

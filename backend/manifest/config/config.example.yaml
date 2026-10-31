@@ -200,6 +200,7 @@ security:
     - "http://127.0.0.1:3000"
   allowPrivateNetwork: false        # 是否允许来自私有网络的 PNA 预检
   trustedProxies: []                # 可信反向代理 IP/CIDR（如 ["127.0.0.1"]）。仅这些地址转发的 X-Forwarded-For 才会被采信；为空时只用 TCP 对端地址做限流
+  clientModelAllowedPorts: [443]    # 浏览器自定义模型 Base URL 允许的 HTTPS 端口（默认仅 443）。中转站使用 8443 等端口时可追加，仍强制 HTTPS 与公网地址校验
   rateLimit:
     requestsPerMinute: 10           # 单调用方每分钟请求速率上限
     burst: 3                        # 允许短时间突发容量

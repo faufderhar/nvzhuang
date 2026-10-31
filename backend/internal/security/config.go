@@ -16,9 +16,12 @@ type SecurityConfig struct {
 	AllowPrivateNetwork bool     `json:"allowPrivateNetwork"`
 	// TrustedProxies 可信反向代理的 IP 或 CIDR。只有来自这些地址的请求，
 	// 才会采信 X-Forwarded-For / X-Real-IP；为空时一律使用 TCP 对端地址。
-	TrustedProxies []string          `json:"trustedProxies"`
-	RateLimit      RateLimitConfig   `json:"rateLimit"`
-	Concurrency    ConcurrencyConfig `json:"concurrency"`
+	TrustedProxies []string `json:"trustedProxies"`
+	// ClientModelAllowedPorts 浏览器自定义模型 Base URL 允许使用的 HTTPS 端口，默认仅 443。
+	// 仍强制 HTTPS 与公网地址校验，只放宽端口（如部分中转站使用 8443）。
+	ClientModelAllowedPorts []int             `json:"clientModelAllowedPorts"`
+	RateLimit               RateLimitConfig   `json:"rateLimit"`
+	Concurrency             ConcurrencyConfig `json:"concurrency"`
 }
 
 type RateLimitConfig struct {
@@ -42,7 +45,8 @@ func DefaultSecurityConfig() *SecurityConfig {
 			"http://localhost:3000",
 			"http://127.0.0.1:3000",
 		},
-		AllowPrivateNetwork: false,
+		AllowPrivateNetwork:     false,
+		ClientModelAllowedPorts: []int{443},
 		RateLimit: RateLimitConfig{
 			RequestsPerMinute:         10,
 			Burst:                     3,
@@ -75,6 +79,14 @@ func LoadSecurityConfig(ctx context.Context) (*SecurityConfig, error) {
 			"https://paipiange.github.io",
 			"http://localhost:3000",
 			"http://127.0.0.1:3000",
+		}
+	}
+	if len(cfg.ClientModelAllowedPorts) == 0 {
+		cfg.ClientModelAllowedPorts = []int{443}
+	}
+	for _, p := range cfg.ClientModelAllowedPorts {
+		if p < 1 || p > 65535 {
+			return nil, fmt.Errorf("security.clientModelAllowedPorts 端口无效: %d", p)
 		}
 	}
 	if cfg.RateLimit.RequestsPerMinute <= 0 {

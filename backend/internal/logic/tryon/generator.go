@@ -151,13 +151,13 @@ func NewGeneratorFromClientConfig(cfg *ModelConfig) (ImageGenerator, error) {
 
 // newModelHTTPClient 创建模型服务 HTTP 客户端。
 // 所有客户端都限制重定向（禁止跨主机与协议降级，防止自定义鉴权头外泄）；
-// 配置来自浏览器时，额外只允许连接公网全球单播地址的 443 端口，并关闭系统代理。
+// 配置来自浏览器时，额外只允许连接公网全球单播地址的允许端口（默认 443），并关闭系统代理。
 func newModelHTTPClient(restrictPrivateNetwork bool) *http.Client {
 	client := &http.Client{Timeout: 180 * time.Second, CheckRedirect: checkModelRedirect}
 	if !restrictPrivateNetwork {
 		return client
 	}
-	client.Transport = newRestrictedTransport(clientAllowedPorts)
+	client.Transport = newRestrictedTransport(currentClientAllowedPorts())
 	return client
 }
 
@@ -198,7 +198,7 @@ func validateClientModelConfig(cfg *ModelConfig) error {
 		return err
 	}
 	if !isAllowedClientPort(u.Port()) {
-		return fmt.Errorf("Base URL 端口不允许访问（仅支持 HTTPS 默认端口 443）")
+		return fmt.Errorf("Base URL 端口不允许访问（仅支持端口 %s）", clientAllowedPortsText())
 	}
 
 	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))

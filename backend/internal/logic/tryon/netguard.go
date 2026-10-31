@@ -8,7 +8,11 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"net/url"
+	"sort"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -96,14 +100,52 @@ func isForbiddenClientIP(ip net.IP) bool {
 	return isForbiddenAddr(addr)
 }
 
-// clientAllowedPorts 浏览器自定义模型地址允许的端口（仅 HTTPS 默认端口）。
-var clientAllowedPorts = map[string]bool{"443": true}
+// clientAllowedPorts 浏览器自定义模型地址允许的端口，默认仅 HTTPS 默认端口 443；
+// 启动时可通过 security.clientModelAllowedPorts 调整（SetClientAllowedPorts）。
+var clientAllowedPorts atomic.Pointer[map[string]bool]
+
+func init() {
+	SetClientAllowedPorts([]int{443})
+}
+
+// SetClientAllowedPorts 设置浏览器自定义模型 Base URL 允许的端口；空列表或无效端口时回退为 443。
+func SetClientAllowedPorts(ports []int) {
+	m := make(map[string]bool, len(ports))
+	for _, p := range ports {
+		if p >= 1 && p <= 65535 {
+			m[strconv.Itoa(p)] = true
+		}
+	}
+	if len(m) == 0 {
+		m["443"] = true
+	}
+	clientAllowedPorts.Store(&m)
+}
+
+func currentClientAllowedPorts() map[string]bool {
+	return *clientAllowedPorts.Load()
+}
+
+// clientAllowedPortsText 返回已允许端口的可读列表（用于错误提示）。
+func clientAllowedPortsText() string {
+	ports := make([]int, 0)
+	for p := range currentClientAllowedPorts() {
+		n, _ := strconv.Atoi(p)
+		ports = append(ports, n)
+	}
+	sort.Ints(ports)
+	parts := make([]string, len(ports))
+	for i, n := range ports {
+		parts[i] = strconv.Itoa(n)
+	}
+	return strings.Join(parts, "、")
+}
 
 func isAllowedClientPort(port string) bool {
 	if port == "" {
 		return true // 由 scheme 决定（https → 443）
 	}
-	return clientAllowedPorts[port]
+	return currentClientAllowedPorts()[port]
 }
 
 // checkModelRedirect 限制重定向：最多 3 次，只允许同协议、同主机、同端口，且禁止 https→http 降级。
@@ -220,16 +262,56 @@ func validateResultURL(raw string) error {
 	return nil
 }
 
-// downloadResultImage 下载上游返回的结果图片：URL 按不可信处理（仅 HTTPS 公网地址），不携带任何鉴权头，并限制大小。
-func downloadResultImage(ctx context.Context, rawURL string) (string, error) {
-	if err := validateResultURL(rawURL); err != nil {
+// trustedResultOrigin 返回服务端配置模型 Base URL 的 origin（scheme://host:port）。
+// 管理员在服务端配置的 Base URL 视为可信（可以是内网或非 443 端口的自建中转），
+// 上游返回与之同源的结果图片地址时允许直接下载；浏览器传入的配置一律返回空串。
+func trustedResultOrigin(cfg *ModelConfig) string {
+	if cfg == nil || cfg.ClientProvided {
+		return ""
+	}
+	return urlOrigin(cfg.BaseURL)
+}
+
+// urlOrigin 规范化为 "scheme://host:port"（小写、补全默认端口）；仅支持 http/https 且不含用户信息。
+func urlOrigin(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.User != nil || u.Hostname() == "" {
+		return ""
+	}
+	scheme := strings.ToLower(u.Scheme)
+	port := u.Port()
+	switch scheme {
+	case "https":
+		if port == "" {
+			port = "443"
+		}
+	case "http":
+		if port == "" {
+			port = "80"
+		}
+	default:
+		return ""
+	}
+	return scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port)
+}
+
+// downloadResultImage 下载上游返回的结果图片：与服务端配置 Base URL 同源的地址走可信客户端，
+// 其余地址按不可信处理（仅 HTTPS 公网 443）；均不携带任何鉴权头，并限制大小。
+func downloadResultImage(ctx context.Context, rawURL, trustedOrigin string) (string, error) {
+	if len(rawURL) > 4096 {
+		return "", fmt.Errorf("结果图片地址无效")
+	}
+	client := downloadHTTPClient
+	if trustedOrigin != "" && urlOrigin(rawURL) == trustedOrigin {
+		client = trustedDownloadHTTPClient
+	} else if err := validateResultURL(rawURL); err != nil {
 		return "", err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("结果图片地址无效")
 	}
-	resp, err := downloadHTTPClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("无法下载模型结果图片")
 	}
@@ -247,5 +329,8 @@ func downloadResultImage(ctx context.Context, rawURL string) (string, error) {
 	return encodeB64(data), nil
 }
 
-// downloadHTTPClient 可在测试中替换。
-var downloadHTTPClient = newDownloadHTTPClient()
+// downloadHTTPClient / trustedDownloadHTTPClient 可在测试中替换。
+var (
+	downloadHTTPClient        = newDownloadHTTPClient()
+	trustedDownloadHTTPClient = &http.Client{Timeout: 120 * time.Second, CheckRedirect: checkModelRedirect}
+)
