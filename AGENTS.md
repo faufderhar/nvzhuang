@@ -39,7 +39,15 @@
 
 ## 3. Git 提交自我审查 Checklist（提交前必查）
 
-在任何 `git commit` 执行之前，Agent 必须在后台严格执行以下核验步骤：
+在任何 `git commit` 执行之前，Agent 必须在后台严格执行以下核验步骤。步骤 1、3、4 已固化为本地脚本 `scripts/check.sh`（任一步失败即非零退出），提交前在仓库根目录运行；步骤 2 与步骤 5 仍需人工逐项确认：
+
+```bash
+scripts/check.sh              # 常规检查：禁止文件、敏感串扫描、vet/test/race/govulncheck、全部前端测试、Shell 语法
+scripts/check.sh --release    # 发布前：额外 -count=5、构建镜像、trivy/grype 镜像扫描、端到端测试（如已提供 scripts/e2e.sh）
+git config core.hooksPath .githooks   # 可选：启用提交前钩子自动运行 check.sh
+```
+
+本项目不使用云端 CI，以上检查全部在本机执行。
 
 - [ ] **步骤 1：排查 Untracked 与暂存文件**
   运行 `git status`，确保没有临时文件、日志文件（`*.log`）、编译产物（`main`、`*.exe`）、真实配置文件（`config.yaml`）进入暂存区。
@@ -91,6 +99,7 @@ nvzhuang/
 ├── data.js                    # 服装数据（META + D 数组：id / 分类 / 关键词 / 图片路径）
 ├── assets/                    # thumbs/、img/ 图片资源
 ├── tests/frontend_tryon_test.mjs  # 前端 Node 测试（从 index.html 抽取函数在 vm 中断言）
+├── scripts/check.sh           # 本地质量门禁（AGENTS.md §3），.githooks/pre-commit 可选调用
 ├── docker-compose.yml         # 后端编排（仅绑定 127.0.0.1:8000、read_only、cap_drop）
 ├── docs/                      # 审计结论、发布清单、需求与技术文档
 └── backend/
