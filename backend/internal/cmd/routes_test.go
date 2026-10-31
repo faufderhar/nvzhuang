@@ -46,7 +46,7 @@ func newRoutesTestServer(t *testing.T, name string, authRequired bool, burst int
 		ConcurrencyManager: security.NewConcurrencyManager(2, 1),
 	}
 
-	s := g.Server(name)
+	s := g.Server(uniqueServerName(name))
 	RegisterRoutes(s, svc, maxBody)
 	s.SetPort(0)
 	s.SetDumpRouterMap(false)

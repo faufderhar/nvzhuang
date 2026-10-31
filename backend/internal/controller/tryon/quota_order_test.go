@@ -32,7 +32,7 @@ func TestQuotaNotConsumedOnConcurrencyOrConfigError(t *testing.T) {
 	g.Cfg().SetAdapter(adapter)
 	defer g.Cfg().SetAdapter(oldAdapter)
 
-	s := g.Server("test-ctrl-quota-order")
+	s := g.Server(uniqueServerName("test-ctrl-quota-order"))
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(middleware.RequestID, middleware.HandlerResponse)
 		group.Bind(NewV1())

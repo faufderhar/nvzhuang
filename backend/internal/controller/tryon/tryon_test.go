@@ -35,7 +35,7 @@ func createTestPNG(w, h int) string {
 
 func TestControllerTryonImageValidation(t *testing.T) {
 	// 启动测试服务
-	s := g.Server("test-ctrl-tryon")
+	s := g.Server(uniqueServerName("test-ctrl-tryon"))
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(middleware.RequestID)
 		group.Bind(NewV1())
@@ -140,7 +140,7 @@ func TestControllerTryonQuotaAndConcurrency(t *testing.T) {
 	secService.DailyQuotaTracker = security.NewDailyQuotaTracker(1)
 	secService.ConcurrencyManager = security.NewConcurrencyManager(1, 1)
 
-	s := g.Server("test-ctrl-quota")
+	s := g.Server(uniqueServerName("test-ctrl-quota"))
 	s.Group("/", func(group *ghttp.RouterGroup) {
 		group.Middleware(middleware.RequestID)
 		group.Bind(NewV1())
