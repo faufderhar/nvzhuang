@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gogf/gf/v2/frame/g"
+	"github.com/gogf/gf/v2/net/ghttp"
 
 	"backend/internal/security"
 )
@@ -23,6 +24,17 @@ type apiErrBody struct {
 }
 
 func newRoutesTestServer(t *testing.T, name string, authRequired bool, burst int, maxBody int64, trustedProxies []string) string {
+	t.Helper()
+	return newRoutesTestServerOpts(t, name, authRequired, burst, maxBody, trustedProxies, nil)
+}
+
+// newRoutesTestServerWith 使用默认参数（需要鉴权）启动测试服务器，并允许在启动前追加注册。
+func newRoutesTestServerWith(t *testing.T, name string, extra func(s *ghttp.Server)) string {
+	t.Helper()
+	return newRoutesTestServerOpts(t, name, true, 3, 1<<20, nil, extra)
+}
+
+func newRoutesTestServerOpts(t *testing.T, name string, authRequired bool, burst int, maxBody int64, trustedProxies []string, extra func(s *ghttp.Server)) string {
 	t.Helper()
 	envKey := "TEST_ROUTES_KEYS_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
 	os.Setenv(envKey, routesTestToken)
@@ -47,6 +59,9 @@ func newRoutesTestServer(t *testing.T, name string, authRequired bool, burst int
 	}
 
 	s := g.Server(uniqueServerName(name))
+	if extra != nil {
+		extra(s)
+	}
 	RegisterRoutes(s, svc, maxBody)
 	s.SetPort(0)
 	s.SetDumpRouterMap(false)
