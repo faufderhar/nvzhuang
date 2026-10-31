@@ -36,8 +36,9 @@ func DoTryonWithValidatedImages(ctx context.Context, personImg, garmentImg *imag
 		gen, err = NewGenerator(ctx, model)
 	}
 	if err != nil {
-		// 模型选择/配置校验错误均为服务端固定文案，可返回给客户端
-		return "", "", "", gerror.WrapCode(gcode.CodeInvalidParameter, err, "")
+		// 模型选择/配置校验错误均为服务端固定文案，可返回给客户端。
+		// 使用 NewCode 而不是 WrapCode，避免错误文案带上 "Invalid Parameter: " 前缀。
+		return "", "", "", gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
 	}
 
 	var promptStr string
