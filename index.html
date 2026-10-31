@@ -1165,6 +1165,11 @@ $('#tabs').onclick=e=>{const b=e.target.closest('.tab');if(!b)return;const v=b.d
 let qt;$('#q').oninput=e=>{clearTimeout(qt);qt=setTimeout(()=>{S.q=e.target.value.trim().toLowerCase();S.n=PAGE;draw()},150)};
 
 // 搜索匹配：支持 中文/英文 关键词
+// - 英文与 ID：前缀匹配（lace 不会命中 necklace，spr-00 命中 spr-0001…）
+// - 中日文（CJK）：子串匹配，单字「裙」可命中「连衣裙」「半身裙」，「鞋」可命中「运动鞋」「高跟鞋」
+// - 中文词同时通过 ZH_ALIAS / ZH2EN 反查全部英文同义词做前缀匹配
+const CJK_RE = /[\u3040-\u30ff\u3400-\u9fff\uf900-\ufaff]/;
+const EN_CAT = { '春':'spring','夏':'summer','秋':'autumn','冬':'winter','ランジェリー':'lingerie','パーティ':'party','水着':'swimwear','セクシー':'sexy' };
 function buildIndex(d){
   const idx = new Set();
   idx.add(d.id.toLowerCase());
@@ -1172,31 +1177,45 @@ function buildIndex(d){
   // 当前语言分类名
   idx.add(catName(d.カテゴリ).toLowerCase());
   // 英文分类名（始终收录，方便英文搜索）
-  const enCat = { '春':'spring','夏':'summer','秋':'autumn','冬':'winter','ランジェリー':'lingerie','パーティ':'party','水着':'swimwear','セクシー':'sexy' }[d.カテゴリ];
+  const enCat = EN_CAT[d.カテゴリ];
   if (enCat) idx.add(enCat);
   // 关键词词元（英文）
   d.キーワード.split(' ').forEach(w=>{
-    idx.add(w);
+    if (!w) return;
+    idx.add(w.toLowerCase());
     const zh = EN2ZH[w];
     if (zh) idx.add(zh);          // 中文翻译
   });
-  return idx;
+  return [...idx];
+}
+function termMatches(idx, w){
+  const cjk = CJK_RE.test(w);
+  const aliases = [];
+  if (ZH_ALIAS[w]) aliases.push(ZH_ALIAS[w]);
+  if (ZH2EN[w]) for (const en of ZH2EN[w]) if (!aliases.includes(en)) aliases.push(en);
+  for (const s of idx) {
+    if (cjk ? s.includes(w) : s.startsWith(w)) return true;
+    for (const a of aliases) if (s.startsWith(a)) return true;
+  }
+  return false;
+}
+function matchesQuery(idx, q){
+  const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+  return words.every(w => termMatches(idx, w));
+}
+// 预建索引：首次搜索或切换语言（分类名随语言变化）时重建，避免每次按键为 1,800+ 条数据重复构建
+let SEARCH_INDEX = null, SEARCH_INDEX_LANG = '';
+function searchIndexFor(d){
+  if (!SEARCH_INDEX || SEARCH_INDEX_LANG !== LANG) {
+    SEARCH_INDEX = new Map(D.map(x => [x.id, buildIndex(x)]));
+    SEARCH_INDEX_LANG = LANG;
+  }
+  return SEARCH_INDEX.get(d.id) || buildIndex(d);
 }
 function hit(d){
   if(S.cat && d.カテゴリ!==S.cat) return false;
   if(!S.q) return true;
-  const idx = buildIndex(d);
-  const words = S.q.split(/\s+/).filter(Boolean);
-  return words.every(w => {
-    // 中文搜索词先反查成英文
-    const aliasEn = ZH_ALIAS[w] || (ZH2EN[w] ? ZH2EN[w][0] : null);
-    // 直接匹配任意收录词
-    for (const s of idx) {
-      if (s.toLowerCase().startsWith(w)) return true;
-      if (aliasEn && s.toLowerCase().startsWith(aliasEn)) return true;
-    }
-    return false;
-  });
+  return matchesQuery(searchIndexFor(d), S.q);
 }
 
 // ===== 卡片渲染 =====
@@ -2283,14 +2302,8 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
 
   // ===== 选择服装 =====
   function getFilteredGarments(){
-    return D.filter(d=>{
-      if(!fitSearchQ) return true;
-      const idx=new Set([d.id.toLowerCase()]);
-      idx.add(d.カテゴリ);
-      d.キーワード.split(' ').forEach(w=>{ idx.add(w); const z=EN2ZH[w]; if(z)idx.add(z); });
-      const words=fitSearchQ.toLowerCase().split(/\s+/).filter(Boolean);
-      return words.every(w=>{ const a=ZH_ALIAS[w]||(ZH2EN[w]?ZH2EN[w][0]:null); for(const s of idx){ if(s.toLowerCase().startsWith(w))return true; if(a&&s.toLowerCase().startsWith(a))return true;} return false; });
-    });
+    if(!fitSearchQ) return D.slice();
+    return D.filter(d=>matchesQuery(searchIndexFor(d), fitSearchQ));
   }
 
   function refreshGarments(){

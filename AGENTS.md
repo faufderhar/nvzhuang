@@ -66,6 +66,7 @@ git config core.hooksPath .githooks   # 可选：启用提交前钩子自动运�
   go test -race ./...
   govulncheck ./...                     # go install golang.org/x/vuln/cmd/govulncheck@latest
   node ../tests/frontend_tryon_test.mjs # 修改 index.html 时必跑（在仓库根目录则为 node tests/frontend_tryon_test.mjs）
+  node ../tests/search_test.mjs        # 搜索召回与性能回归（scripts/check.sh 会运行 tests/ 下全部 .mjs）
   ```
   涉及测试辅助代码或路由注册时，额外运行 `go test -count=5 ./...` 确认无重复注册等不稳定问题。
 - [ ] **步骤 5：文档与配置同步**
@@ -100,6 +101,7 @@ nvzhuang/
 ├── data.js                    # 服装数据（META + D 数组：id / 分类 / 关键词 / 图片路径）
 ├── assets/                    # thumbs/、img/ 图片资源
 ├── tests/frontend_tryon_test.mjs  # 前端 Node 测试（从 index.html 抽取函数在 vm 中断言）
+├── tests/search_test.mjs          # 搜索召回/性能回归（中文子串、英文与 ID 前缀）
 ├── scripts/check.sh           # 本地质量门禁（AGENTS.md §3），.githooks/pre-commit 可选调用
 ├── docker-compose.yml         # 后端编排（仅绑定 127.0.0.1:8000、read_only、cap_drop）
 ├── docs/                      # 审计结论、发布清单、需求与技术文档
