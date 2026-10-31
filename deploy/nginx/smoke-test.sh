@@ -50,6 +50,7 @@ check "XFF 被覆盖为对端地址" "$(echo "$r" | python3 -c 'import json,sys;
 h=$($C -D - -o /dev/null https://api.example.com:18443/hello | tr -d '\r')
 check "HSTS" "$(echo "$h" | grep -ci '^strict-transport-security')" "1"
 check "nosniff" "$(echo "$h" | grep -ci '^x-content-type-options: nosniff')" "1"
+check "Permissions-Policy" "$(echo "$h" | grep -ci '^permissions-policy:')" "1"
 check "隐藏版本" "$(echo "$h" | grep -i '^server:' | grep -c '[0-9]')" "0"
 check "HTTP 跳转 HTTPS" "$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: api.example.com' http://127.0.0.1:18081/x)" "301"
 head -c 32000000 /dev/zero > big.bin
@@ -59,6 +60,7 @@ codes=""; for _ in $(seq 1 10); do codes="$codes $($C -o /dev/null -w '%{http_co
 check "tryon 突发限流出现 429" "$(echo "$codes" | grep -c 429)" "1"
 r=$($C -D - -o body429 -X POST -d '{}' https://api.example.com:18443/tryon | tr -d '\r')
 check "网关 429 JSON + Retry-After" "$(echo "$r" | grep -ci '^retry-after: 10') $(python3 -c 'import json;print(json.load(open("body429"))["data"]["error_code"])')" "1 RATE_LIMITED"
+check "网关错误页保留安全头" "$(echo "$r" | grep -ciE '^(strict-transport-security|x-content-type-options|permissions-policy|content-security-policy):')" "4"
 r=$($C -D - -o b2 https://api.example.com:18443/backend429 | tr -d '\r')
 check "后端 JSON 429 原样透传" "$(python3 -c 'import json;print(json.load(open("b2"))["data"]["error_code"])') $(echo "$r" | grep -i '^retry-after' | awk '{print $2}')" "CONCURRENCY_LIMITED 5"
 r=$($C -o b504 -w '%{http_code}' https://api.example.com:18443/slow)

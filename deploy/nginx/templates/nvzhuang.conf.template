@@ -48,6 +48,7 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "no-referrer" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
     add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
 
     # 请求体：后端上限约 20 MB，这里留余量；开启请求缓冲，慢速上传不会占用后端连接
@@ -70,6 +71,13 @@ server {
         default_type application/json;
         add_header Retry-After "10" always;
         add_header Cache-Control "no-store" always;
+        # 子 location 一旦声明 add_header 就不再继承 server 级的头，安全头需在此重复
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "no-referrer" always;
+        add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+        add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
     }
 
     # 通用代理设置
