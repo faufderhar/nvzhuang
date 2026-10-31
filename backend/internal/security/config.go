@@ -19,9 +19,11 @@ type SecurityConfig struct {
 	TrustedProxies []string `json:"trustedProxies"`
 	// ClientModelAllowedPorts 浏览器自定义模型 Base URL 允许使用的 HTTPS 端口，默认仅 443。
 	// 仍强制 HTTPS 与公网地址校验，只放宽端口（如部分中转站使用 8443）。
-	ClientModelAllowedPorts []int             `json:"clientModelAllowedPorts"`
-	RateLimit               RateLimitConfig   `json:"rateLimit"`
-	Concurrency             ConcurrencyConfig `json:"concurrency"`
+	ClientModelAllowedPorts []int `json:"clientModelAllowedPorts"`
+	// StateDir 每日额度持久化目录（bbolt 单文件 quota.db）。为空表示纯内存计数（重启清零）。
+	StateDir    string            `json:"stateDir"`
+	RateLimit   RateLimitConfig   `json:"rateLimit"`
+	Concurrency ConcurrencyConfig `json:"concurrency"`
 }
 
 type RateLimitConfig struct {

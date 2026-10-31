@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/gogf/gf/v2 v2.10.4
+	go.etcd.io/bbolt v1.5.0
 	golang.org/x/image v0.45.0
 	golang.org/x/time v0.5.0
 )

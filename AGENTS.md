@@ -33,6 +33,7 @@
 
 2. **最小权限与数据隐私**：
    - 前端用户的「个人模型配置」与历史生成记录仅保存在用户浏览器本地（`localStorage` / `sessionStorage`（“仅本次会话”）/ `IndexedDB`），后端在内存中使用，不得向磁盘持久化、不得写入服务端日志。
+   - 服务端唯一允许落盘的运行状态是 `security.stateDir` 下的每日额度计数（键为主体 SHA-256 前缀，不含 IP/Token/请求内容）。
    - 用户上传的照片同样只在内存中处理；ComfyUI 模式下上传到 ComfyUI 的 temp 目录并在完成或取消后清理历史，不得写入后端日志或长期目录。
 
 ---
@@ -150,7 +151,8 @@ nvzhuang/
 ## 8. 关键配置项（`backend/manifest/config/config.example.yaml`）
 
 - `security.authRequired` / `apiKeysEnv`（默认 `TRYON_API_KEYS`）/ `trustedOrigins` / `allowPrivateNetwork` / `trustedProxies` / `clientModelAllowedPorts`。
-- `security.rateLimit`：`requestsPerMinute`、`burst`、`limiterIdleMinutes`、`dailyRequestsPerPrincipal`；`security.concurrency`：`global`、`perPrincipal`、`queueTimeoutSeconds`（默认 0 不排队，最大 60；排队超时与并发拒绝返回 429 + `Retry-After: 5`）。
+- `security.rateLimit`：`requestsPerMinute`、`burst`、`limiterIdleMinutes`、`dailyRequestsPerPrincipal`；`security.stateDir`：每日额度 bbolt 持久化目录（空 = 纯内存）；只落盘主体哈希 + 日期 + 次数，目录不可用时启动失败，运行期出错降级为内存并使 `/readyz` 的 `state` 失败。
+- `security.concurrency`：`global`、`perPrincipal`、`queueTimeoutSeconds`（默认 0 不排队，最大 60；排队超时与并发拒绝返回 429 + `Retry-After: 5`）。
 - `llm.requestTimeoutSeconds`：云端模型 HTTP 总超时（默认 180，10–1800）；必须小于反向代理读超时（Nginx 建议 300s）且比 `shutdown.timeoutSeconds` 至少小 5 秒。
 - `shutdown.drainDelaySeconds`（默认 3）/ `shutdown.timeoutSeconds`（默认 190，须大于模型请求超时）。
 - `upload.*`：请求体上限（默认 24 MiB，超限统一 413 JSON）、单图编码/解码大小、合计大小、宽高与像素上限、允许 MIME（jpeg/png/webp）。

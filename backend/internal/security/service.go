@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
 )
@@ -46,6 +47,17 @@ func InitService(ctx context.Context) (*Service, error) {
 		RateLimiter:        NewRateLimiter(cfg.RateLimit.RequestsPerMinute, cfg.RateLimit.Burst, cfg.RateLimit.LimiterIdleMinutes),
 		DailyQuotaTracker:  NewDailyQuotaTracker(cfg.RateLimit.DailyRequestsPerPrincipal),
 		ConcurrencyManager: NewConcurrencyManager(cfg.Concurrency.Global, cfg.Concurrency.PerPrincipal),
+	}
+	if dir := strings.TrimSpace(cfg.StateDir); dir != "" {
+		store, err := NewBoltQuotaStore(dir, DefaultStateLockTimeout)
+		if err != nil {
+			// 配置了持久化却无法使用时直接启动失败，避免误以为额度已持久化
+			return nil, fmt.Errorf("初始化额度持久化存储失败（security.stateDir）: %w", err)
+		}
+		s.DailyQuotaTracker.SetStore(store)
+		g.Log().Info(ctx, "每日额度已启用持久化存储（security.stateDir）")
+	} else {
+		g.Log().Info(ctx, "每日额度为内存计数，进程重启后清零（如需持久化请设置 security.stateDir）")
 	}
 	defaultService = s
 	return s, nil
