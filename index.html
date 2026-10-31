@@ -757,6 +757,8 @@ footer a:hover{color:var(--tx);text-decoration:underline}
   </div>
 </div>
 
+<!-- 可选的部署期配置（默认不设置任何值），见 config.js 注释 -->
+<script src="config.js"></script>
 <script src="data.js"></script>
 <script>
 // ===== 双语字典 =====
@@ -878,7 +880,9 @@ const I18N = {
     errImageFileTooLarge: '图片文件过大，请压缩后重试', errImageDimensionsInvalid: '图片尺寸无法处理，请使用宽、高不超过 8192 像素的有效图片',
     errImagePixelLimitExceeded: '图片像素过高，请缩小后重试（最大 2000 万像素）',
     errUpstreamFailed: '换装生成失败，请稍后重试', errInternal: '换装服务内部错误，请稍后重试', errInvalidRequest: '请求参数无效，请刷新页面后重试',
-    errRateLimited: '请求过于频繁，请稍后重试', errDailyQuotaExceeded: '今日生成额度已用完', errConcurrencyLimited: '当前生成任务较多，请稍后重试',
+    errRateLimited: '请求过于频繁，请稍后重试', errDailyQuotaExceeded: '今日生成额度已用完，请明天再试（额度按 UTC 零点，即北京时间 8 点重置）',
+    retryAfterSuffix: '（请 {n} 秒后重试）', retryCountdown: '请求较多，{n} 秒后可再次生成', retryReady: '现在可以重新生成了',
+    aiGatewayTimeout: '生成超时，服务端可能仍在处理，请稍后重试或开启图片压缩', errConcurrencyLimited: '当前生成任务较多，请稍后重试',
     historyTitle: '生成记录', historySubtitle: '生成结果仅保存在当前浏览器，不会上传或跨设备同步。',
     historyLocalOnly: '使用浏览器本机存储；清除浏览器站点数据后，记录也会被删除。',
     historyEmpty: '还没有生成记录', historyEmptyHint: '完成一次 AI 换装后，结果会自动保存在这里。',
@@ -1003,7 +1007,9 @@ const I18N = {
     errImageFileTooLarge: 'Image file too large, please compress and retry', errImageDimensionsInvalid: 'Image dimensions cannot be processed; use a valid image no larger than 8192 px per side',
     errImagePixelLimitExceeded: 'Image pixel limit exceeded (maximum 20 million pixels)',
     errUpstreamFailed: 'Try-on generation failed, please retry', errInternal: 'Try-on service internal error, please retry', errInvalidRequest: 'Invalid request, please refresh the page and retry',
-    errRateLimited: 'Too many requests, please try again later', errDailyQuotaExceeded: 'Daily generation quota exceeded', errConcurrencyLimited: 'High generation concurrency, please try again later',
+    errRateLimited: 'Too many requests, please try again later', errDailyQuotaExceeded: 'Daily generation quota used up. Please try again tomorrow (resets at 00:00 UTC).',
+    retryAfterSuffix: ' (retry in {n}s)', retryCountdown: 'Busy right now. You can generate again in {n}s', retryReady: 'You can generate again now',
+    aiGatewayTimeout: 'Generation timed out. The server may still be working; try again later or enable image compression', errConcurrencyLimited: 'High generation concurrency, please try again later',
     historyTitle: 'Generation history', historySubtitle: 'Results stay in this browser and are never uploaded or synced across devices.',
     historyLocalOnly: 'Stored locally by your browser. Clearing this site’s browser data will also remove these records.',
     historyEmpty: 'No generation history yet', historyEmptyHint: 'Completed AI try-on results will be saved here automatically.',
@@ -1144,8 +1150,20 @@ function applyLang(){
   drawTabs();
   draw();
 }
+const LANG_STORAGE_KEY = 'nvzhuang_lang';
+// 初始语言优先级：URL ?lang= > 本机保存的选择 > 中文
+function resolveInitialLang(qsLang, savedLang){
+  if (qsLang === 'en' || qsLang === 'zh') return qsLang;
+  if (savedLang === 'en' || savedLang === 'zh') return savedLang;
+  return 'zh';
+}
+function readSavedLang(){ try{ return localStorage.getItem(LANG_STORAGE_KEY) || ''; }catch(_){ return ''; } }
 document.querySelectorAll('#langswitch button').forEach(b=>{
-  b.addEventListener('click', ()=>{ LANG=b.dataset.lang; applyLang(); });
+  b.addEventListener('click', ()=>{
+    LANG=b.dataset.lang;
+    try{ localStorage.setItem(LANG_STORAGE_KEY, LANG); }catch(_){}
+    applyLang();
+  });
 });
 document.querySelectorAll('[data-theme-toggle]').forEach(toggle=>{
   toggle.addEventListener('click', ()=>setTheme(THEME === 'dark' ? 'light' : 'dark'));
@@ -1489,6 +1507,46 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
   const deleteHistoryRecord = id=>historyRequest('readwrite', store=>store.delete(id));
   const clearHistoryRecords = ()=>historyRequest('readwrite', store=>store.clear());
   const countHistoryRecords = ()=>historyRequest('readonly', store=>store.count());
+  // 按 createdAt 从旧到新删除，直到只剩 keep 条
+  const pruneHistoryRecords = keep=>historyRequest('readwrite', store=>{
+    const countReq = store.count();
+    countReq.onsuccess = ()=>{
+      let excess = countReq.result - keep;
+      if(excess <= 0) return;
+      const cursorReq = store.index('createdAt').openCursor();
+      cursorReq.onsuccess = ()=>{
+        const cursor = cursorReq.result;
+        if(!cursor || excess <= 0) return;
+        cursor.delete();
+        excess--;
+        cursor.continue();
+      };
+    };
+    return null;
+  });
+
+  // 生成记录保留策略：最多 HISTORY_MAX_RECORDS 条；存储占用超过 90% 时先收缩；写入遇到配额错误时收缩后重试一次
+  const HISTORY_MAX_RECORDS = 50;
+  const HISTORY_PRESSURE_RATIO = 0.9;
+  const HISTORY_PRESSURE_KEEP = 25;
+  const HISTORY_QUOTA_KEEP = 10;
+  function isQuotaExceededError(err){
+    return Boolean(err) && (err.name === 'QuotaExceededError' || err.name === 'NS_ERROR_DOM_QUOTA_REACHED' || err.code === 22);
+  }
+  async function saveRecordWithRetention(record, ops){
+    try{
+      const est = ops.estimate ? await ops.estimate() : null;
+      if(est && est.quota > 0 && est.usage / est.quota > HISTORY_PRESSURE_RATIO) await ops.prune(HISTORY_PRESSURE_KEEP);
+    }catch(_){}
+    try{
+      await ops.put(record);
+    }catch(err){
+      if(!isQuotaExceededError(err)) throw err;
+      await ops.prune(HISTORY_QUOTA_KEEP);
+      await ops.put(record);
+    }
+    try{ await ops.prune(HISTORY_MAX_RECORDS); }catch(_){}
+  }
 
   function detectImageMimeFromBytes(bytes){
     if(!bytes || bytes.length < 3) return '';
@@ -1653,7 +1711,11 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
       model: tryonSettings.useCustom ? tryonSettings.model : (responseData.model || aiModel.value),
       image: b64ToBlob(imageB64, imageMime),
     };
-    await putHistoryRecord(record);
+    await saveRecordWithRetention(record, {
+      put: putHistoryRecord,
+      prune: pruneHistoryRecords,
+      estimate: (navigator.storage && navigator.storage.estimate) ? ()=>navigator.storage.estimate() : null,
+    });
     await updateHistoryCount();
   }
 
@@ -2411,7 +2473,21 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
   }
 
   // 默认后端地址：设置中心保存的地址优先；否则依次读取 window.AI_API_URL、安全校验后的 ?tryon= 和本地回退。
-  const DEFAULT_AI_API = (window.AI_API_URL) || (()=>{
+  // config.js 中的 window.AI_API_URL 同样须满足：HTTPS，或本地回环地址；否则忽略
+  function sanitizeConfiguredApi(value){
+    if(typeof value !== 'string' || !value.trim()) return '';
+    try{
+      const base = (location.origin && location.origin !== 'null') ? location.origin : 'http://127.0.0.1';
+      const u = new URL(value.trim(), base);
+      if(u.username || u.password) return '';
+      if(u.protocol === 'https:' || (u.protocol === 'http:' && isLoopbackHost(u.hostname))){
+        return u.toString().replace(/\/+$/,'');
+      }
+    }catch(_){}
+    console.warn('[Security] 已忽略不安全的 AI_API_URL 配置（仅允许 HTTPS 或本地回环地址）。');
+    return '';
+  }
+  const DEFAULT_AI_API = sanitizeConfiguredApi(window.AI_API_URL) || (()=>{
     const safeTryon = parseSafeTryonParam();
     if(safeTryon) return safeTryon;
     if(location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:') return 'http://127.0.0.1:8000';
@@ -2535,7 +2611,20 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     return resp.json().catch(()=>null);
   }
 
-  // 映射服务端返回的标准业务错误码与 HTTP 异常
+  // 解析 Retry-After（秒数或 HTTP 日期），返回 1–3600 的整数秒；无效时返回 0
+  function parseRetryAfter(value, now = Date.now()){
+    const raw = String(value || '').trim();
+    if(!raw) return 0;
+    let seconds = /^\d+$/.test(raw) ? Number(raw) : Math.ceil((Date.parse(raw) - now) / 1000);
+    if(!Number.isFinite(seconds) || seconds <= 0) return 0;
+    return Math.min(3600, Math.max(1, Math.round(seconds)));
+  }
+  function withRetry(info, resp){
+    const retryAfter = parseRetryAfter(resp && resp.headers && resp.headers.get ? resp.headers.get('retry-after') : '');
+    return retryAfter ? {...info, retryAfter} : info;
+  }
+
+  // 映射服务端返回的标准业务错误码与 HTTP 异常（含 Nginx 等网关返回的非 JSON 429/413/502/504）
   function getErrorMessageFromResponse(resp, data){
     const errCode = (data && data.data && data.data.error_code) || '';
     const bizCode = (data && typeof data.code === 'number') ? data.code : (resp ? resp.status : 0);
@@ -2549,9 +2638,11 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     if(errCode === 'IMAGE_FILE_TOO_LARGE' || bizCode === 42203) return { code: 'IMAGE_FILE_TOO_LARGE', text: t('errImageFileTooLarge') };
     if(errCode === 'IMAGE_DIMENSIONS_INVALID' || bizCode === 42204) return { code: 'IMAGE_DIMENSIONS_INVALID', text: t('errImageDimensionsInvalid') };
     if(errCode === 'IMAGE_PIXEL_LIMIT_EXCEEDED' || bizCode === 42205) return { code: 'IMAGE_PIXEL_LIMIT_EXCEEDED', text: t('errImagePixelLimitExceeded') };
-    if(errCode === 'RATE_LIMITED' || bizCode === 42901) return { code: 'RATE_LIMITED', text: t('errRateLimited') };
+    if(errCode === 'RATE_LIMITED' || bizCode === 42901) return withRetry({ code: 'RATE_LIMITED', text: t('errRateLimited') }, resp);
     if(errCode === 'DAILY_QUOTA_EXCEEDED' || bizCode === 42902) return { code: 'DAILY_QUOTA_EXCEEDED', text: t('errDailyQuotaExceeded') };
-    if(errCode === 'CONCURRENCY_LIMITED' || bizCode === 42903) return { code: 'CONCURRENCY_LIMITED', text: t('errConcurrencyLimited') };
+    if(errCode === 'CONCURRENCY_LIMITED' || bizCode === 42903) return withRetry({ code: 'CONCURRENCY_LIMITED', text: t('errConcurrencyLimited') }, resp);
+    // 网关（如 Nginx limit_req）直接返回的 429 没有业务码
+    if(bizCode === 429) return withRetry({ code: 'RATE_LIMITED', text: t('errRateLimited') }, resp);
     // 后端固定文案的错误码按界面语言展示，避免出现“换装失败，请稍后重试：换装生成失败，请稍后重试”这类重复提示
     if(errCode === 'UPSTREAM_FAILED' || bizCode === 50201) return { code: 'UPSTREAM_FAILED', text: t('errUpstreamFailed') };
     if(errCode === 'INTERNAL_ERROR' || bizCode === 50001) return { code: 'INTERNAL_ERROR', text: t('errInternal') };
@@ -2564,7 +2655,10 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
       return { code: '', text: t('aiFailed') + '：' + data.message };
     }
     const status = resp ? Number(resp.status) || 0 : 0;
-    if(status === 502 || status === 503 || status === 504){
+    if(status === 504){
+      return { code: 'GATEWAY_TIMEOUT', text: `${t('aiGatewayTimeout')}（HTTP 504）` };
+    }
+    if(status === 502 || status === 503){
       return { code: 'GATEWAY_ERROR', text: `${t('aiGatewayErr')}（HTTP ${status}）` };
     }
     if(resp && resp.ok){
@@ -2676,8 +2770,31 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     openServiceDialog(options.trigger || aiGenerate, msg, Boolean(options.settings));
   }
 
+  // 限流/并发 429 带 Retry-After 时：倒计时期间不再发起请求，并在提示区显示剩余秒数
+  let retryBlockedUntil = 0;
+  let retryTimer = null;
+  function retryRemainingSeconds(now = Date.now()){
+    return Math.max(0, Math.ceil((retryBlockedUntil - now) / 1000));
+  }
+  function startRetryCountdown(seconds){
+    retryBlockedUntil = Date.now() + seconds * 1000;
+    clearInterval(retryTimer);
+    const tick = ()=>{
+      const left = retryRemainingSeconds();
+      if(left <= 0){
+        clearInterval(retryTimer);
+        retryTimer = null;
+        showHint(t('retryReady'));
+        return;
+      }
+      showHint(t('retryCountdown').replace('{n}', String(left)));
+    };
+    retryTimer = setInterval(tick, 1000);
+  }
+
   async function doTryon(){
     // 前置校验
+    if(retryRemainingSeconds() > 0){ showHint(t('retryCountdown').replace('{n}', String(retryRemainingSeconds()))); return; }
     if(!personSrc){ showTryonError(t('aiNeedPhoto')); return; }
     const selectedGarment = getSelectedGarment();
     if(!selectedGarment){
@@ -2773,7 +2890,9 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
       const ok = resp.ok && data && data.code === 0 && data.data && data.data.image;
       if(!ok){
         const errInfo = getErrorMessageFromResponse(resp, data);
-        showTryonError(errInfo.text, {settings:errInfo.code === 'AUTH_REQUIRED'});
+        const retryText = errInfo.retryAfter ? errInfo.text + t('retryAfterSuffix').replace('{n}', String(errInfo.retryAfter)) : errInfo.text;
+        showTryonError(retryText, {settings:errInfo.code === 'AUTH_REQUIRED'});
+        if(errInfo.retryAfter) startRetryCountdown(errInfo.retryAfter);
         if(errInfo.code === 'REQUEST_TOO_LARGE' && fitCompressEl && !fitCompressEl.checked){
           fitCompressEl.checked = true;
           localStorage.setItem(COMPRESS_STORAGE_KEY, '1');
@@ -2825,10 +2944,9 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
 })();
 
 // ===== 初始化 =====
-// 支持 URL 参数指定初始语言（?lang=en）和初始搜索词（?q=白），默认中文
+// 支持 URL 参数指定初始语言（?lang=en，优先于本机保存的语言）和初始搜索词（?q=白），默认中文
 const qs = new URLSearchParams(location.search);
-const qsLang = qs.get('lang');
-if (qsLang==='en' || qsLang==='zh') LANG = qsLang;
+LANG = resolveInitialLang(qs.get('lang'), readSavedLang());
 const qsQ = qs.get('q');
 if (qsQ) { S.q = qsQ.trim().toLowerCase(); const qi=$('#q'); qi.value=qsQ.trim(); }
 applyLang();
