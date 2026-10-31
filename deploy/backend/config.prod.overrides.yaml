@@ -1,0 +1,24 @@
+# 生产环境需要在 config.yaml 中覆盖的键（仅列出与 config.example.yaml 不同的部分）。
+# 这是文档性片段：把这些值合并进你的 config.yaml，不要直接用本文件启动。
+# 测试 TestProdOverridesConsistency 会校验它与 deploy/docker-compose.prod.yml、Nginx 模板保持一致。
+llm:
+  requestTimeoutSeconds: 180       # 必须小于 Nginx proxy_read_timeout（模板为 300s）
+
+shutdown:
+  drainDelaySeconds: 3
+  timeoutSeconds: 190              # ≥ llm.requestTimeoutSeconds + 5
+
+security:
+  authRequired: true               # 仅限熟人使用：必须开启 Token 鉴权（Token 通过 TRYON_API_KEYS 环境变量注入）
+  trustedProxies: ["172.30.0.2/32"] # 只信任 Nginx 容器；不要写 127.0.0.1 或整个 Docker 网段
+  trustedOrigins:
+    - "https://frontend.example.com" # 占位：你的前端来源
+  stateDir: "/app/data"            # 每日额度持久化（compose 已挂载 tryon-state 卷）
+  rateLimit:
+    requestsPerMinute: 10
+    burst: 3
+    dailyRequestsPerPrincipal: 100
+  concurrency:
+    global: 6                      # 4c24g：配合 GOMEMLIMIT=2GiB 与 3 GiB 容器上限
+    perPrincipal: 1
+    queueTimeoutSeconds: 10

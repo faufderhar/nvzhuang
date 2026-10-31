@@ -2647,6 +2647,12 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     if(errCode === 'UPSTREAM_FAILED' || bizCode === 50201) return { code: 'UPSTREAM_FAILED', text: t('errUpstreamFailed') };
     if(errCode === 'INTERNAL_ERROR' || bizCode === 50001) return { code: 'INTERNAL_ERROR', text: t('errInternal') };
     if(errCode === 'INVALID_REQUEST' || bizCode === 40001) return { code: 'INVALID_REQUEST', text: t('errInvalidRequest') };
+    // 生产 Nginx 的 JSON 错误页（deploy/nginx/errors）：50200 / 50400
+    if(errCode === 'GATEWAY_TIMEOUT' || bizCode === 50400) return { code: 'GATEWAY_TIMEOUT', text: `${t('aiGatewayTimeout')}（HTTP 504）` };
+    if(errCode === 'GATEWAY_ERROR' || bizCode === 50200){
+      const gwStatus = resp ? Number(resp.status) || 502 : 502;
+      return { code: 'GATEWAY_ERROR', text: `${t('aiGatewayErr')}（HTTP ${gwStatus}）` };
+    }
 
     if(data && data.message){
       if(tryonSettings.useCustom && /browser-custom/i.test(data.message)){

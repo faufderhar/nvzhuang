@@ -106,6 +106,8 @@ nvzhuang/
 ├── tests/frontend_small_wins_test.mjs # 生成记录保留（≤50 条）、Retry-After/网关错误映射、语言记忆、config.js 约束
 ├── scripts/check.sh           # 本地质量门禁（AGENTS.md §3），.githooks/pre-commit 可选调用
 ├── docker-compose.yml         # 后端编排（仅绑定 127.0.0.1:8000、read_only、cap_drop）
+├── deploy/                    # 生产叠加：docker-compose.prod.yml（Nginx 容器 + 固定网络 172.30.0.0/24）、nginx 模板与 JSON 错误页、
+│                              #   config.prod.overrides.yaml、.env.prod.example（仅占位值）、host/init-host.sh、nginx/smoke-test.sh
 ├── docs/                      # 审计结论、发布清单、需求与技术文档
 └── backend/
     ├── main.go                # 入口 → internal/cmd
@@ -128,7 +130,7 @@ nvzhuang/
 - Go：`go 1.26`（`backend/go.mod`；x/net 等依赖要求 1.26），Docker 构建镜像 `golang:1.26-alpine`。
 - 运行后端：`cd backend && go run .`；无 `config.yaml` 时自动加载 `config.example.yaml`，未配置地址时监听 `:8000`。`security.authRequired: true`（默认）时必须在 `TRYON_API_KEYS` 中提供 32–512 字符的随机 Token（如 `openssl rand -hex 32`）。
 - 运行前端：仓库根目录起任意静态服务（如 `python3 -m http.server 3000`），默认 CORS 白名单包含 `http://localhost:3000` 与 `http://127.0.0.1:3000`。
-- 测试命令见第 3 节步骤 4。Fuzz 目标（按需短时运行，例如 `go test -run '^$' -fuzz '^FuzzNormalizePath$' -fuzztime 20s ./internal/middleware`）：
+- 测试命令见第 3 节步骤 4。修改 `deploy/nginx/` 后在本机运行 `NGINX_BIN=/path/to/nginx deploy/nginx/smoke-test.sh`（`scripts/check.sh` 检测到 nginx 时会自动执行）。Fuzz 目标（按需短时运行，例如 `go test -run '^$' -fuzz '^FuzzNormalizePath$' -fuzztime 20s ./internal/middleware`）：
   - `internal/middleware`：`FuzzNormalizePath`、`FuzzSanitizeRequestID`
   - `internal/logic/tryon`：`FuzzValidateClientModelConfig`
   - `internal/security`：`FuzzRedactSecrets`
@@ -145,8 +147,8 @@ nvzhuang/
 3. **结果图片下载**：上游返回的 URL 默认按不可信处理（仅 HTTPS 公网 443）；仅当模型来自服务端配置、且结果地址与其 `baseURL` 同源时才使用可信客户端（允许内网/http/非 443）。下载不携带任何鉴权头，限制大小与重定向次数。
 4. **重定向与响应体**：模型接口只允许同协议同主机重定向（最多 3 次，防 `x-goog-api-key` 等外泄）；上游响应体限量读取（生成结果 64 MiB、视觉 1 MiB、错误体 4 KiB）。
 5. **远程地址 HTTPS**：服务端与前端对非本机地址一律要求 HTTPS；只有本机回环允许 http。
-6. **客户端 IP**：限流/配额默认只用 TCP 对端地址；仅当对端属于 `security.trustedProxies` 时，才从 `X-Forwarded-For` 自右向左取第一个非可信地址（其次 `X-Real-IP`）。
-7. **错误处理**：上游原始错误绝不回显，经 `security.RedactSecrets` 脱敏后写服务端日志；对外返回固定文案 + `request_id`（`X-Request-ID` 仅接受 1–64 位 `[A-Za-z0-9_-]`，否则重新生成）。HTTP 状态码按真实类型返回：400 参数/配置校验、401 鉴权、403 来源不允许、413 请求体过大、422 图片校验失败、429 限流/额度/并发、500 内部错误、502 上游失败（`UPSTREAM_FAILED`）、503 模型未配置/不支持。参数类错误使用 `gerror.NewCode`（不要用会带 “Invalid Parameter:” 前缀的 `WrapCode(..., "")`）。
+6. **客户端 IP**：限流/配额默认只用 TCP 对端地址；仅当对端属于 `security.trustedProxies` 时，才从 `X-Forwarded-For` 自右向左取第一个非可信地址（其次 `X-Real-IP`）。不可信的私网/回环对端携带转发头时只告警（限频、仅记录对端），绝不采信。生产 `trustedProxies` 只能是 Nginx 容器的 `/32`（`deploy/` 中为 `172.30.0.2/32`），不得放宽为网关或整个 Docker 网段；`TestProdOverridesConsistency` 校验它与 compose、Nginx 模板（`X-Forwarded-For $remote_addr`、`proxy_read_timeout` ≥ 模型超时 + 60s、后端无端口发布）一致。
+7. **错误处理**：上游原始错误绝不回显，经 `security.RedactSecrets` 脱敏后写服务端日志；对外返回固定文案 + `request_id`（`X-Request-ID` 仅接受 1–64 位 `[A-Za-z0-9_-]`，否则重新生成）。HTTP 状态码按真实类型返回：400 参数/配置校验、401 鉴权、403 来源不允许、413 请求体过大、422 图片校验失败、429 限流/额度/并发、500 内部错误、502 上游失败（`UPSTREAM_FAILED`）、503 模型未配置/不支持。生产 Nginx 自身的 JSON 错误页使用 `41300 REQUEST_TOO_LARGE`、`42900 RATE_LIMITED`、`50200 GATEWAY_ERROR`、`50400 GATEWAY_TIMEOUT`（`deploy/nginx/errors/`），新增或修改错误码时同步前端映射与该目录。参数类错误使用 `gerror.NewCode`（不要用会带 “Invalid Parameter:” 前缀的 `WrapCode(..., "")`）。
 8. **Token**：只保存 SHA-256 并恒定时间比较；启动时拒绝示例/占位与低熵 Token，`authRequired: true` 且无有效 Token 时启动失败。
 9. **CORS**：`security.trustedOrigins` 精确匹配白名单，禁止 `*`，响应带 `Vary: Origin`。
 10. **暴露面**：Swagger/OpenAPI 默认关闭；compose 仅绑定 `127.0.0.1:8000`，容器非 root、只读根文件系统；保留 `config.example.yaml` 回退与 `:8000` 兜底。

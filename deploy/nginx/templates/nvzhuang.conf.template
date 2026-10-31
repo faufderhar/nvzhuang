@@ -1,0 +1,110 @@
+# nvzhuang 生产反向代理模板（官方 nginx 镜像启动时只对下列三个环境变量占位符做 envsubst，见 compose 的 NGINX_ENVSUBST_FILTER）
+# 需要的环境变量（见 deploy/.env.prod.example，均为占位值）：
+#   API_SERVER_NAME   对外 API 域名，例如 api.example.com
+#   TLS_CERT_PATH     证书链路径（容器内），TLS_KEY_PATH 私钥路径（容器内）
+# 拓扑：客户端 → 本容器（172.30.0.2，唯一对外发布 80/443）→ 后端容器（172.30.0.10:8000，不发布端口）
+# 后端 security.trustedProxies 必须是 ["172.30.0.2/32"]，否则限流/额度会把所有用户算作同一个代理地址。
+
+# ---- 限流（在后端令牌桶之前先挡住洪泛；数值为占位起点，按实际流量调整） ----
+limit_req_zone  $binary_remote_addr zone=tryon_req:10m rate=20r/m;
+limit_req_zone  $binary_remote_addr zone=api_req:10m   rate=60r/m;
+limit_conn_zone $binary_remote_addr zone=per_ip_conn:10m;
+limit_req_status  429;
+limit_conn_status 429;
+
+upstream nvzhuang_backend {
+    server 172.30.0.10:8000 max_fails=0;
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ${API_SERVER_NAME};
+    # ACME HTTP-01 校验目录（certbot webroot 模式）
+    location ^~ /.well-known/acme-challenge/ { root /var/www/acme; }
+    location / { return 301 https://$host$request_uri; }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name ${API_SERVER_NAME};
+
+    ssl_certificate     ${TLS_CERT_PATH};
+    ssl_certificate_key ${TLS_KEY_PATH};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    server_tokens off;
+    merge_slashes on;
+
+    # 安全响应头（API 只返回 JSON）
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
+
+    # 请求体：后端上限约 20 MB，这里留余量；开启请求缓冲，慢速上传不会占用后端连接
+    client_max_body_size 30m;
+    client_body_buffer_size 1m;
+    client_body_timeout 60s;
+    proxy_request_buffering on;
+
+    # 网关自身产生的错误统一返回 JSON（后端返回的 JSON 错误原样透传，不被替换）
+    proxy_intercept_errors off;
+    error_page 413 /__errors/413.json;
+    error_page 429 /__errors/429.json;
+    error_page 502 503 /__errors/502.json;
+    error_page 504 /__errors/504.json;
+    location ^~ /__errors/ {
+        internal;
+        # 413 内部跳转到这里时不能再次触发请求体大小检查，否则会回落为默认 HTML 错误页
+        client_max_body_size 0;
+        alias /etc/nginx/errors/;
+        default_type application/json;
+        add_header Retry-After "10" always;
+        add_header Cache-Control "no-store" always;
+    }
+
+    # 通用代理设置
+    proxy_http_version 1.1;
+    proxy_set_header Connection "";
+    proxy_set_header Host $host;
+    # 只传递本代理看到的真实对端地址：覆盖（而不是追加）客户端自带的 X-Forwarded-For，杜绝伪造
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_connect_timeout 5s;
+    # 必须大于后端 llm.requestTimeoutSeconds（默认 180 秒）+ 余量，否则慢请求会在 Nginx 侧 504
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_buffering on;
+
+    # 生图接口：更严格的限流与单 IP 并发
+    location = /tryon {
+        limit_req  zone=tryon_req burst=5 nodelay;
+        limit_conn per_ip_conn 2;
+        proxy_pass http://nvzhuang_backend;
+    }
+
+    # 探针只给本机/内网监控使用，不对公网开放（容器健康检查直接访问后端）
+    location ~ ^/(healthz|readyz)$ {
+        allow 127.0.0.1;
+        allow ::1;
+        allow 172.30.0.0/24;
+        deny all;
+        proxy_pass http://nvzhuang_backend;
+    }
+
+    location / {
+        limit_req  zone=api_req burst=20 nodelay;
+        limit_conn per_ip_conn 10;
+        proxy_pass http://nvzhuang_backend;
+    }
+}
