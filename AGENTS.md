@@ -32,7 +32,7 @@
    - Dockerfile 构建阶段与 Compose 编排阶段，必须确保模板配置文件就绪，实现开箱即用。
 
 2. **最小权限与数据隐私**：
-   - 前端用户的「个人模型配置」与历史生成记录仅保存在用户浏览器本地（`localStorage` / `sessionStorage`（“仅本次会话”）/ `IndexedDB`），后端在内存中使用，不得向磁盘持久化、不得写入服务端日志。
+   - 前端用户的「个人模型配置」与历史生成记录仅保存在用户浏览器本地（`localStorage` / `sessionStorage`（“仅本次会话”）/ `IndexedDB`），后端在内存中使用，不得向磁盘持久化、不得写入服务端日志。生成记录最多保留 50 条（按 createdAt 淘汰最旧，遇到存储配额错误先收缩再重试）；界面语言保存在 `localStorage` 的 `nvzhuang_lang`（`?lang=` 优先）。
    - 服务端唯一允许落盘的运行状态是 `security.stateDir` 下的每日额度计数（键为主体 SHA-256 前缀，不含 IP/Token/请求内容）。
    - 用户上传的照片同样只在内存中处理；ComfyUI 模式下上传到 ComfyUI 的 temp 目录并在完成或取消后清理历史，不得写入后端日志或长期目录。
 
@@ -99,9 +99,11 @@ git config core.hooksPath .githooks   # 可选：启用提交前钩子自动运�
 nvzhuang/
 ├── index.html                 # 单文件前端：页面、样式、交互、中英文字典 I18N、AI 试穿与设置中心、CSP meta
 ├── data.js                    # 服装数据（META + D 数组：id / 分类 / 关键词 / 图片路径）
+├── config.js                  # 可选部署期配置：默认只有注释；window.AI_API_URL 只接受 HTTPS 或回环地址，禁止写入任何密钥
 ├── assets/                    # thumbs/、img/ 图片资源
 ├── tests/frontend_tryon_test.mjs  # 前端 Node 测试（从 index.html 抽取函数在 vm 中断言）
 ├── tests/search_test.mjs          # 搜索召回/性能回归（中文子串、英文与 ID 前缀）
+├── tests/frontend_small_wins_test.mjs # 生成记录保留（≤50 条）、Retry-After/网关错误映射、语言记忆、config.js 约束
 ├── scripts/check.sh           # 本地质量门禁（AGENTS.md §3），.githooks/pre-commit 可选调用
 ├── docker-compose.yml         # 后端编排（仅绑定 127.0.0.1:8000、read_only、cap_drop）
 ├── docs/                      # 审计结论、发布清单、需求与技术文档

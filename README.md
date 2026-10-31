@@ -174,7 +174,7 @@ docker run -d --name costume-tryon \
 前端静态页面通过以下顺序识别换装后端地址（优先级从高到低）：
 
 1. **设置中心**：用户在当前浏览器保存的「后端 API 地址」（跨源外部公网后端须使用 `HTTPS`）
-2. **全局变量**：在 HTML 加载前配置 `window.AI_API_URL = "http://localhost:8000"`
+2. **全局变量**：在 `config.js` 中配置 `window.AI_API_URL = "https://api.example.com"`（仅接受 HTTPS 或本机回环地址；默认不设置）
 3. **URL 参数**：`https://你的前端地址/?tryon=http://localhost:8000`（安全约束：为防止钓鱼窃取 API Key 与私密照片，`?tryon=` 仅允许同源或本机回环 `localhost/127.0.0.1`；外部后端须在设置中心显式保存）
 4. **本地回退**：本地以 `localhost` 或 `127.0.0.1` 访问前端时，默认自动连接 `http://127.0.0.1:8000`
 
@@ -215,6 +215,7 @@ npx serve -l 3000 .
 nvzhuang/
 ├── index.html          # 页面结构 + 样式 + 交互逻辑（含双语字典、AI 试穿搭配台）
 ├── data.js             # 1407 条服装数据（id / 分类 / 关键词 / 图片路径）
+├── config.js           # 可选部署期配置（默认为空，可设置 window.AI_API_URL）
 ├── docker-compose.yml  # 一键启动后端 Docker 容器编排
 ├── assets/
 │   ├── thumbs/         # 缩略图（webp，网格卡片用）

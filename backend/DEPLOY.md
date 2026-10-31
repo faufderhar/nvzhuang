@@ -126,14 +126,15 @@ llm:
 前端 `index.html` 按以下优先级获取后端地址：
 
 1. **设置中心**：用户在当前浏览器保存的后端 API 地址（公网外部地址须使用 `HTTPS`）
-2. **全局变量**：在页面加载前设置 `window.AI_API_URL = "https://api.你的域名"`
+2. **全局变量**：在仓库根目录的 `config.js`（默认不设置任何值，由 `index.html` 在 `data.js` 之前加载）中设置 `window.AI_API_URL = "https://api.你的域名"`；只接受 HTTPS 或本机回环地址，其余会被忽略
 3. **URL 参数**：`https://你的前端/?tryon=http://127.0.0.1:8000`（安全约束：为防止跨域钓鱼窃取 API Key 与私密照片，`?tryon=` 仅允许同源地址或本机回环 `localhost/127.0.0.1`；外部后端须在设置中心显式保存）
 4. **本地自动回退**：访问宿主为 `localhost` 或 `127.0.0.1` 时，自动尝试回退连接 `http://127.0.0.1:8000`
 
-> 建议：若部署公网，把后端反向代理到 `https://api.你的域名`（Nginx 配置见下），前端部署时在 `index.html` 顶部加一句：
-> ```html
-> <script>window.AI_API_URL="https://api.你的域名";</script>
+> 建议：若部署公网，把后端反向代理到 `https://api.你的域名`（Nginx 配置见下），前端部署时只需覆盖 `config.js`，无需修改 `index.html`：
+> ```js
+> window.AI_API_URL = "https://api.你的域名";
 > ```
+> `config.js` 会原样下发给所有访客，不要在其中写入 Token 或 API Key。
 
 ## 四、Nginx 反向代理（可选但推荐）
 
