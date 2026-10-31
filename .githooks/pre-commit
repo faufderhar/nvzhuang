@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# 可选的本地提交钩子：git config core.hooksPath .githooks 启用；git commit --no-verify 可临时跳过。
+set -euo pipefail
+exec "$(git rev-parse --show-toplevel)/scripts/check.sh"
