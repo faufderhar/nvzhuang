@@ -36,6 +36,9 @@ func (m *CORSMiddleware) Handler(r *ghttp.Request) {
 		return
 	}
 
+	// 响应内容随 Origin 变化，必须声明 Vary，避免共享缓存把某个来源的 CORS 头返回给其他来源
+	r.Response.Header().Add("Vary", "Origin")
+
 	normOrigin := strings.TrimRight(strings.TrimSpace(origin), "/")
 	if !m.trustedOrigins[normOrigin] {
 		WriteAPIError(r, security.ErrOriginNotAllowed)

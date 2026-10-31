@@ -36,6 +36,9 @@ func NewTokenStore(authRequired bool, envKey string) (*TokenStore, error) {
 			if len(token) < 32 || len(token) > 512 {
 				return nil, fmt.Errorf("环境变量 %s 中的 Token 长度无效（必须为 32 到 512 个字符）", envKey)
 			}
+			if isPlaceholderToken(token) {
+				return nil, fmt.Errorf("环境变量 %s 中包含示例/占位 Token，请使用随机值（例如 openssl rand -hex 32）", envKey)
+			}
 			sum := sha256.Sum256([]byte(token))
 			principalID := hex.EncodeToString(sum[:8]) // 前 16 个十六进制字符
 			tokens = append(tokens, TokenEntry{
@@ -85,4 +88,27 @@ func (s *TokenStore) ValidateToken(rawToken string) (string, bool) {
 		return matchedPrincipal, true
 	}
 	return "", false
+}
+
+// placeholderMarkers 文档与 .env.example 中出现过的示例 Token 片段；
+// 直接复制示例值上线会让任何读过文档的人都能调用接口，因此启动时拒绝。
+var placeholderMarkers = []string{
+	"your-", "your_", "changeme", "change-me", "change_me", "replace-me", "replace_me",
+	"placeholder", "example", "with-at-least-32", "another-backend-token", "another-client-token",
+	"<", ">", "openssl",
+}
+
+// isPlaceholderToken 判断 Token 是否为示例值或熵过低（不同字符过少）。
+func isPlaceholderToken(token string) bool {
+	lower := strings.ToLower(token)
+	for _, m := range placeholderMarkers {
+		if strings.Contains(lower, m) {
+			return true
+		}
+	}
+	distinct := make(map[rune]struct{})
+	for _, r := range token {
+		distinct[r] = struct{}{}
+	}
+	return len(distinct) < 10
 }

@@ -15,6 +15,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -105,8 +106,31 @@ func (c *ComfyUI) Name() string {
 	return c.name
 }
 
+// comfyHealthTTL 健康检查成功结果的缓存时长，避免每次换装/健康探测都重复拉取 /object_info。
+var comfyHealthTTL = 30 * time.Second
+
+var comfyHealthCache sync.Map // key -> time.Time（最近一次成功时间）
+
+func (c *ComfyUI) healthCacheKey() string {
+	return strings.Join([]string{c.baseURL, c.workflowPath, c.personNode, c.garmentNode, c.promptNode, c.outputNode}, "|")
+}
+
 // Health 验证 ComfyUI API、固定工作流和工作流所需节点是否可用，不执行推理。
+// 成功结果缓存 comfyHealthTTL，失败不缓存。
 func (c *ComfyUI) Health(ctx context.Context) error {
+	key := c.healthCacheKey()
+	if v, ok := comfyHealthCache.Load(key); ok && comfyHealthTTL > 0 && time.Since(v.(time.Time)) < comfyHealthTTL {
+		return nil
+	}
+	if err := c.health(ctx); err != nil {
+		comfyHealthCache.Delete(key)
+		return err
+	}
+	comfyHealthCache.Store(key, time.Now())
+	return nil
+}
+
+func (c *ComfyUI) health(ctx context.Context) error {
 	if c.baseURL == "" {
 		return fmt.Errorf("ComfyUI 地址未配置")
 	}
@@ -222,8 +246,12 @@ func (c *ComfyUI) Generate(ctx context.Context, personB64, garmentB64, prompt, s
 			return "", err
 		}
 	}
-	if err := setComfyInput(workflow, c.outputNode, "filename_prefix", "tryon/local-"+runID); err != nil {
-		return "", err
+	// PreviewImage 输出写入 ComfyUI temp 目录（重启即清空），无 filename_prefix 输入；
+	// SaveImage 会把结果永久写入 output 目录，需要运维定期清理（见 DEPLOY.md）。
+	if comfyNodeClass(workflow, c.outputNode) != "PreviewImage" {
+		if err := setComfyInput(workflow, c.outputNode, "filename_prefix", "tryon/local-"+runID); err != nil {
+			return "", err
+		}
 	}
 
 	promptID, err := c.queuePrompt(ctx, workflow, runID)
@@ -235,13 +263,89 @@ func (c *ComfyUI) Generate(ctx context.Context, personB64, garmentB64, prompt, s
 	defer cancel()
 	imageRef, err := c.waitForImage(waitCtx, promptID)
 	if err != nil {
+		// 客户端断开或超时：取消排队/中断执行，避免继续占用 GPU
+		c.cancelPrompt(promptID)
 		return "", err
 	}
 	imageData, err := c.downloadImage(waitCtx, imageRef)
+	c.deleteHistory(promptID)
 	if err != nil {
 		return "", err
 	}
 	return base64.StdEncoding.EncodeToString(imageData), nil
+}
+
+func comfyNodeClass(workflow map[string]interface{}, nodeID string) string {
+	node, _ := workflow[nodeID].(map[string]interface{})
+	classType, _ := node["class_type"].(string)
+	return classType
+}
+
+// comfyCleanupTimeout 清理请求使用独立的短超时上下文，不受已取消的请求上下文影响。
+const comfyCleanupTimeout = 5 * time.Second
+
+func (c *ComfyUI) postJSON(path string, payload interface{}) bool {
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), comfyCleanupTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(body))
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+	resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 300
+}
+
+// cancelPrompt 从队列删除任务；若任务正在执行，则只中断该 prompt_id（不影响其他任务）。
+func (c *ComfyUI) cancelPrompt(promptID string) {
+	if promptID == "" {
+		return
+	}
+	_ = c.postJSON("/queue", map[string]interface{}{"delete": []string{promptID}})
+	if c.isPromptRunning(promptID) {
+		_ = c.postJSON("/interrupt", map[string]string{"prompt_id": promptID})
+	}
+	c.deleteHistory(promptID)
+}
+
+func (c *ComfyUI) isPromptRunning(promptID string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), comfyCleanupTimeout)
+	defer cancel()
+	body, err := c.getJSON(ctx, "/queue")
+	if err != nil {
+		return false
+	}
+	var queue struct {
+		Running [][]interface{} `json:"queue_running"`
+	}
+	if err := json.Unmarshal(body, &queue); err != nil {
+		return false
+	}
+	for _, item := range queue.Running {
+		if len(item) > 1 {
+			if id, _ := item[1].(string); id == promptID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// deleteHistory 删除任务历史，避免他人通过 ComfyUI /history 枚举到本次换装的输入输出文件名。
+func (c *ComfyUI) deleteHistory(promptID string) {
+	if promptID == "" {
+		return
+	}
+	_ = c.postJSON("/history", map[string]interface{}{"delete": []string{promptID}})
 }
 
 func (c *ComfyUI) uploadImage(ctx context.Context, prefix string, data []byte) (string, error) {
@@ -256,8 +360,11 @@ func (c *ComfyUI) uploadImage(ctx context.Context, prefix string, data []byte) (
 	if _, err := part.Write(data); err != nil {
 		return "", fmt.Errorf("无法准备 ComfyUI 图片上传")
 	}
-	_ = writer.WriteField("type", "input")
-	_ = writer.WriteField("overwrite", "true")
+	// 上传到 temp 目录（ComfyUI 重启时自动清空），文件名带随机 runID 不会互相覆盖；
+	// 工作流中以 "<subfolder>/<name> [temp]" 注解引用。
+	_ = writer.WriteField("type", "temp")
+	_ = writer.WriteField("subfolder", "tryon")
+	_ = writer.WriteField("overwrite", "false")
 	if err := writer.Close(); err != nil {
 		return "", fmt.Errorf("无法准备 ComfyUI 图片上传")
 	}
@@ -279,7 +386,21 @@ func (c *ComfyUI) uploadImage(ctx context.Context, prefix string, data []byte) (
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil || result.Name == "" {
 		return "", fmt.Errorf("ComfyUI 图片上传响应无效")
 	}
-	return result.Name, nil
+	return comfyAnnotatedName(result), nil
+}
+
+// comfyAnnotatedName 生成 LoadImage 可识别的带目录注解的文件名，例如 "tryon/person-x.png [temp]"。
+func comfyAnnotatedName(r comfyUploadResponse) string {
+	name := r.Name
+	if r.Subfolder != "" {
+		name = r.Subfolder + "/" + name
+	}
+	switch r.Type {
+	case "temp", "output":
+		return name + " [" + r.Type + "]"
+	default:
+		return name
+	}
 }
 
 func (c *ComfyUI) queuePrompt(ctx context.Context, workflow map[string]interface{}, clientID string) (string, error) {

@@ -104,7 +104,8 @@ Authorization: Bearer ${BACKEND_ACCESS_TOKEN}
 环境变量格式：
 
 ```dotenv
-TRYON_API_KEYS=owner-token-with-at-least-32-characters,second-owner-token-with-at-least-32-characters
+# 使用 openssl rand -hex 32 生成，示例/占位值会被后端拒绝
+TRYON_API_KEYS=<随机Token1>,<随机Token2>
 ```
 
 ### 4.3 FR-2：认证主体标识

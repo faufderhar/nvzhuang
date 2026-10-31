@@ -6,7 +6,10 @@ package tryon
 
 import (
 	"context"
+	"errors"
 
+	"github.com/gogf/gf/v2/errors/gcode"
+	"github.com/gogf/gf/v2/errors/gerror"
 	"github.com/gogf/gf/v2/net/ghttp"
 
 	"backend/api/tryon/v1"
@@ -38,23 +41,24 @@ func (c *ControllerV1) Tryon(ctx context.Context, req *v1.TryonReq) (res *v1.Try
 		return nil, nil
 	}
 
-	// 2. 检查并原子扣减每日调用额度
 	principalID := r.GetCtxVar(middleware.CtxPrincipalID).String()
 	if principalID == "" {
 		principalID = "anonymous"
 	}
-	if !secService.DailyQuotaTracker.CheckAndDeduct(principalID) {
-		middleware.WriteAPIError(r, security.ErrDailyQuotaExceeded)
-		return nil, nil
-	}
 
-	// 3. 并发控制（单 Token 并发与全局并发）
+	// 2. 先占用并发槽位：被并发限制拒绝的请求不应消耗每日额度
 	release, ok := secService.ConcurrencyManager.Acquire(principalID)
 	if !ok {
 		middleware.WriteAPIError(r, security.ErrConcurrencyLimited)
 		return nil, nil
 	}
 	defer release()
+
+	// 3. 检查并原子扣减每日调用额度
+	if !secService.DailyQuotaTracker.CheckAndDeduct(principalID) {
+		middleware.WriteAPIError(r, security.ErrDailyQuotaExceeded)
+		return nil, nil
+	}
 
 	var clientConfig *tryon.ModelConfig
 	if req.ClientConfig != nil {
@@ -77,11 +81,16 @@ func (c *ControllerV1) Tryon(ctx context.Context, req *v1.TryonReq) (res *v1.Try
 		clientConfig,
 	)
 	if err != nil {
+		// 参数/模型配置错误发生在调用上游之前，没有产生成本，退还额度
+		if !errors.Is(err, security.ErrUpstreamFailed) && gerror.Code(err) == gcode.CodeInvalidParameter {
+			secService.DailyQuotaTracker.Refund(principalID)
+		}
 		return nil, err
 	}
 	imageMIME, err := tryon.DetectGeneratedImageMIME(imageB64)
 	if err != nil {
-		return nil, err
+		// 上游返回了非图片内容：按上游失败处理，不回显内容
+		return nil, security.ErrUpstreamFailed
 	}
 	return &v1.TryonRes{
 		Image:  imageB64,

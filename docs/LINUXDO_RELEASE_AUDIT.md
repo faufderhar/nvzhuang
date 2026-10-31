@@ -18,7 +18,9 @@
 | **社区友链** | README 与前端页面页脚已显著添加指向 `https://linux.do/` 的真实友链与推荐语。 | **PASSED** | 遵守社区规范，不夸大宣传为官方合作，仅标注文明理想型社区友链。 |
 | **AI 功能边界** | 图库浏览、多维搜索、大图查看、手动试穿与购买同款跳转均为纯前端免费使用；真实 AI 换装需自建 Go 后端并自行配置大模型 API Key。 | **PASSED** | 页面与文档中均已显式标注「需自备后端与 API Key，可能产生模型费用」，杜绝误导。 |
 | **文档一致性** | 主 README、后端 README、DEPLOY.md 均已对齐，统一支持 GPT Image 2、豆包 Seedream、Gemini 及 Docker 部署。 | **PASSED** | 统一了模型名称与协议描述。 |
-| **密钥安全性** | `config.yaml` 均包含在 `.gitignore` 中，仅保留 `config.example.yaml` 与 `.env.example`；提交历史与代码中无硬编码真实 Key。 | **PASSED** | 无泄漏风险。 |
+| **密钥安全性** | `config.yaml` 均包含在 `.gitignore` 中，仅保留 `config.example.yaml` 与 `.env.example`；提交历史与代码中无硬编码真实 Key（2026-10-30 复核：正则命中均为 go.sum 哈希或文档占位符的误报）。`.env.example` 已不再提供可直接使用的占位 Token，后端拒绝示例值。 | **PASSED** | 建议在 CI 中接入 gitleaks。 |
+| **后端接口安全** | 2026-10-30 深度审计发现路径变体绕过鉴权（`//tryon`）、SSRF 黑名单不全、上游错误回显、XFF 伪造绕过限流等 27 项问题，已在 `fix/audit-2026-10-30` 分支逐项修复并补充回归测试。 | **PENDING** | 待所有者审阅并合并该分支；ComfyUI temp 上传/中断清理需在真实 ComfyUI 上验证一次。 |
+| **依赖漏洞** | 修复前 govulncheck 报告 5 个可达漏洞（x/image WebP、otel）；升级后 `govulncheck ./...` 结果为 No vulnerabilities found。go 指令升级为 1.26.0。 | **PENDING** | 合并后在 CI 中持续运行 govulncheck；GoFrame 仍为 v2.7.1，升级 v2.10 需单独评估。 |
 
 ---
 
@@ -32,7 +34,12 @@
 - GitHub Pages 地址 `https://paipiange.github.io/nvzhuang/png/SPR-0001.png` 属于超大原始文件，仓库中已托管高质量 `assets/img/*.webp`（优化后 WebP 格式，清晰度满足高分辨率屏幕浏览与 AI 试穿提取）。
 - **已做处理**：在前端下载交互中，当原尺寸 PNG 缺失时，自动平滑回退到展示大图 WebP 进行下载，保证用户体验不中断。
 
-### 2.3 结论与行动建议
+### 2.3 2026-10-30 深度代码审计与修复
+- 上一版结论只覆盖许可证、素材与文档，**没有覆盖后端接口安全**；本次补充审计发现的高危项包括：用 `//tryon` 等路径变体绕过鉴权/限流/体积限制（F-01）、SSRF 地址黑名单不完整（F-02）、上游原始错误回显给客户端（F-03）。
+- 修复要点：路径规范化后统一鉴权、仅信任配置的反向代理、全量 IANA 特殊地址拒绝表 + 连接时校验、强制 HTTPS 与 443 端口、限制重定向与响应体积、错误脱敏与 502/400/500 状态码、示例 Token 拒绝、ComfyUI temp 上传与任务清理、容器非 root 与端口仅绑定回环、前端 CSP 与“仅本次会话”存储。
+- 部署侧需要配合：Nginx 开启 `merge_slashes` 并覆盖 `X-Forwarded-For`，在 `security.trustedProxies` 中声明代理地址（详见 `backend/DEPLOY.md` 第四、五节）。
+
+### 2.4 结论与行动建议
 目前项目**代码、素材与许可证合规已全面达标**：
 1. 已正式采用 **MIT 协议**，代码与图集全量可商用开源。
 2. 社区发帖时遵守《关于开源推广类主题的补充公告》要求，使用截图方式发帖，不复制大段 AI 生成文本。

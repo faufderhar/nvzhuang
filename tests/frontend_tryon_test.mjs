@@ -121,4 +121,61 @@ assert.equal(context.getErrorMessageFromResponse({status: 403, ok: false}, null)
 assert.match(context.getErrorMessageFromResponse({status: 502, ok: false}, null).text, /502/);
 assert.match(context.getErrorMessageFromResponse({status: 200, ok: true}, null).text, /invalid response/);
 
+// /comfyui/health 已纳入后端鉴权：设置页“测试连接”必须携带后端 Token
+{
+  const start = html.indexOf("settingsComfyTest.addEventListener('click'");
+  assert.ok(start >= 0, 'missing ComfyUI health handler');
+  const handler = html.slice(start, html.indexOf('settingsForm.addEventListener', start));
+  assert.match(handler, /settingsBackendToken\.value/, 'health check must read backend token');
+  assert.match(handler, /\['Authorization'\]\s*=\s*'Bearer '/, 'health check must send Authorization header');
+  assert.match(handler, /fetch\(backendUrl \+ '\/comfyui\/health', \{headers:healthHeaders\}\)/);
+}
+
+// 后端上游失败返回 502 JSON 固定文案（F-03/F-24）：前端应展示该文案，而不是通用网关错误
+{
+  const msg = context.getErrorMessageFromResponse({status: 502, ok: false},
+    {code: 50201, message: '换装生成失败，请稍后重试', data: {error_code: 'UPSTREAM_FAILED', request_id: 'r1'}});
+  assert.match(msg.text, /换装生成失败/);
+}
+
+// F-17：内容安全策略
+{
+  const csp = html.match(/<meta http-equiv="Content-Security-Policy" content="([^"]+)">/);
+  assert.ok(csp, 'missing CSP meta');
+  const policy = csp[1];
+  for (const directive of ["default-src 'self'", "object-src 'none'", "base-uri 'none'", "frame-src 'none'"]) {
+    assert.ok(policy.includes(directive), `CSP missing ${directive}`);
+  }
+  assert.ok(!policy.includes("'unsafe-eval'"), 'CSP must not allow eval');
+  assert.match(policy, /connect-src [^;]*https:/, 'CSP must allow https backends');
+  assert.match(policy, /connect-src [^;]*http:\/\/127\.0\.0\.1:\*/, 'CSP must allow loopback backend');
+  assert.match(policy, /script-src 'self' 'unsafe-inline';/, 'no third-party script origins allowed');
+  assert.ok(html.indexOf('Content-Security-Policy') < html.indexOf('<script'), 'CSP must precede first script');
+}
+
+// F-17：“仅本次会话”模式只写 sessionStorage，并清除长期存储中的旧副本
+{
+  function fakeStorage() {
+    const map = new Map();
+    return {
+      map,
+      getItem: k => (map.has(k) ? map.get(k) : null),
+      setItem: (k, v) => map.set(k, String(v)),
+      removeItem: k => map.delete(k),
+    };
+  }
+  const storageCtx = {localStorage: fakeStorage(), sessionStorage: fakeStorage(), SETTINGS_KEY: 'k', JSON};
+  vm.createContext(storageCtx);
+  vm.runInContext(['readStoredSettings', 'persistSettings', 'clearStoredSettings'].map(extractFunction).join('\n'), storageCtx);
+
+  storageCtx.persistSettings({apiKey: 'long-term', sessionOnly: false});
+  assert.ok(storageCtx.localStorage.map.has('k'));
+  storageCtx.persistSettings({apiKey: 'session-secret', sessionOnly: true});
+  assert.ok(!storageCtx.localStorage.map.has('k'), 'session-only must remove persistent copy');
+  assert.match(storageCtx.sessionStorage.getItem('k'), /session-secret/);
+  assert.match(storageCtx.readStoredSettings(), /session-secret/);
+  storageCtx.clearStoredSettings();
+  assert.equal(storageCtx.readStoredSettings(), null);
+}
+
 console.log('frontend try-on tests passed');

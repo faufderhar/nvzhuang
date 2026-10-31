@@ -5,8 +5,8 @@ import (
 
 	"github.com/gogf/gf/v2/frame/g"
 	"github.com/gogf/gf/v2/net/ghttp"
-	"github.com/gogf/gf/v2/os/gcmd"
 	"github.com/gogf/gf/v2/os/gcfg"
+	"github.com/gogf/gf/v2/os/gcmd"
 	"github.com/gogf/gf/v2/os/gfile"
 
 	"backend/internal/controller/hello"
@@ -60,30 +60,46 @@ var (
 			}
 
 			imgLimits := imagevalidate.LoadImageLimits(ctx)
-			corsMw := middleware.NewCORSMiddleware(secService.Config)
-			bodyLimitMw := middleware.NewBodyLimitMiddleware(imgLimits.MaxRequestBodyBytes)
-			authMw := middleware.NewAuthMiddleware(secService.TokenStore)
-			rateLimitMw := middleware.NewRateLimitMiddleware(secService.RateLimiter)
 
 			s := g.Server()
 			EnsureServerPort(ctx, s)
-
-			s.Group("/", func(group *ghttp.RouterGroup) {
-				group.Middleware(
-					middleware.RequestID,
-					ghttp.MiddlewareHandlerResponse,
-					corsMw.Handler,
-					bodyLimitMw.Handler,
-					authMw.Handler,
-					rateLimitMw.Handler,
-				)
-				group.Bind(
-					hello.NewV1(),
-					tryon.NewV1(),
-				)
-			})
+			RegisterRoutes(s, secService, imgLimits.MaxRequestBodyBytes)
 			s.Run()
 			return nil
 		},
 	}
 )
+
+// RegisterRoutes 注册全部路由与中间件。
+//
+// 鉴权、限流和请求体上限直接挂在业务路由组上（而不是依赖 URL 精确匹配），
+// 因此 //tryon、///tryon、/tryon/ 等任何能命中处理器的写法都会经过安全中间件。
+func RegisterRoutes(s *ghttp.Server, secService *security.Service, maxBodyBytes int64) {
+	corsMw := middleware.NewCORSMiddleware(secService.Config)
+	bodyLimitMw := middleware.NewBodyLimitMiddleware(maxBodyBytes)
+	authMw := middleware.NewAuthMiddlewareWithProxies(secService.TokenStore, secService.TrustedProxies)
+	rateLimitMw := middleware.NewRateLimitMiddleware(secService.RateLimiter)
+
+	// GoFrame 默认 ClientMaxBodySize 为 8MB，会在业务中间件之前以 500 纯文本拒绝请求；
+	// 这里设为业务上限 + 余量，保证超限请求统一返回 413 REQUEST_TOO_LARGE。
+	s.SetClientMaxBodySize(bodyLimitMw.MaxBytes() + middleware.BodyLimitMargin)
+
+	s.Group("/", func(group *ghttp.RouterGroup) {
+		group.Middleware(
+			middleware.RequestID,
+			middleware.HandlerResponse,
+			corsMw.Handler,
+		)
+		group.Bind(hello.NewV1())
+
+		// 受保护的业务接口：/tryon、/comfyui/health
+		group.Group("/", func(protected *ghttp.RouterGroup) {
+			protected.Middleware(
+				bodyLimitMw.Enforce,
+				authMw.Enforce,
+				rateLimitMw.Enforce,
+			)
+			protected.Bind(tryon.NewV1())
+		})
+	})
+}

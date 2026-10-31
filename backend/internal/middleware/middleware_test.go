@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -275,5 +276,99 @@ func TestRateLimitMiddleware(t *testing.T) {
 	_ = json.NewDecoder(resp2.Body).Decode(&res)
 	if res.Code != 42901 || res.Data.ErrorCode != "RATE_LIMITED" {
 		t.Fatalf("unexpected 429 response: %+v", res)
+	}
+}
+
+func TestNormalizePathAndProtected(t *testing.T) {
+	for _, p := range []string{"/tryon", "//tryon", "///tryon", "//tryon/", "/tryon/", "/./tryon", "/x/../tryon", "/TRYON", "\\tryon", "/comfyui//health", "//comfyui/health/"} {
+		if !IsProtectedPath(p) {
+			t.Fatalf("expected %q to be protected", p)
+		}
+	}
+	for _, p := range []string{"/", "/hello", "/tryonx", "/api/tryon"} {
+		if IsProtectedPath(p) {
+			t.Fatalf("expected %q to be public", p)
+		}
+	}
+}
+
+func TestSanitizeRequestID(t *testing.T) {
+	if SanitizeRequestID("abc-DEF_123") != "abc-DEF_123" {
+		t.Fatal("valid id rejected")
+	}
+	for _, bad := range []string{"", strings.Repeat("a", 65), "<script>", "a b", "id\r\nX-Injected: 1"} {
+		if SanitizeRequestID(bad) != "" {
+			t.Fatalf("expected %q to be rejected", bad)
+		}
+	}
+}
+
+func TestRequestIDMiddlewareRegenerates(t *testing.T) {
+	s := g.Server("test-request-id")
+	s.Group("/", func(group *ghttp.RouterGroup) {
+		group.Middleware(RequestID)
+		group.ALL("/x", func(r *ghttp.Request) { r.Response.Write(GetRequestID(r)) })
+	})
+	s.SetPort(0)
+	_ = s.Start()
+	defer s.Shutdown()
+	url := "http://127.0.0.1:" + strings.Split(s.GetListenedAddress(), ":")[1] + "/x"
+
+	req, _ := http.NewRequest(http.MethodGet, url, nil)
+	req.Header.Set("X-Request-ID", strings.Repeat("<script>", 400))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	got := resp.Header.Get("X-Request-ID")
+	if strings.Contains(got, "<") || len(got) == 0 || len(got) > 64 || string(body) != got {
+		t.Fatalf("unsafe request id echoed: header=%q body=%q", got, body)
+	}
+
+	req2, _ := http.NewRequest(http.MethodGet, url, nil)
+	req2.Header.Set("X-Request-ID", "client-trace-01")
+	resp2, err := http.DefaultClient.Do(req2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp2.Body.Close()
+	if resp2.Header.Get("X-Request-ID") != "client-trace-01" {
+		t.Fatalf("valid request id should be kept, got %q", resp2.Header.Get("X-Request-ID"))
+	}
+}
+
+func TestCORSVaryOrigin(t *testing.T) {
+	cors := NewCORSMiddleware(&security.SecurityConfig{TrustedOrigins: []string{"http://localhost:3000"}})
+	s := g.Server("test-cors-vary")
+	s.Group("/", func(group *ghttp.RouterGroup) {
+		group.Middleware(RequestID, cors.Handler)
+		group.ALL("/x", func(r *ghttp.Request) { r.Response.Write("ok") })
+	})
+	s.SetPort(0)
+	_ = s.Start()
+	defer s.Shutdown()
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:"+strings.Split(s.GetListenedAddress(), ":")[1]+"/x", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if !strings.Contains(resp.Header.Get("Vary"), "Origin") {
+		t.Fatalf("expected Vary: Origin, got %q", resp.Header.Get("Vary"))
+	}
+}
+
+func TestIsBodyTooLarge(t *testing.T) {
+	if !IsBodyTooLarge(&http.MaxBytesError{Limit: 1}) {
+		t.Fatal("MaxBytesError not detected")
+	}
+	if !IsBodyTooLarge(fmt.Errorf("Read from request Body failed: %w", &http.MaxBytesError{Limit: 1})) {
+		t.Fatal("wrapped MaxBytesError not detected")
+	}
+	if IsBodyTooLarge(fmt.Errorf("other")) {
+		t.Fatal("false positive")
 	}
 }

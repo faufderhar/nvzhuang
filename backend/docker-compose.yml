@@ -5,8 +5,31 @@ services:
       dockerfile: manifest/docker/Dockerfile
     container_name: costume-tryon-backend
     restart: unless-stopped
+    # 默认仅绑定本机回环地址，由同机 Nginx 反向代理对外提供服务；
+    # 确需直接对外暴露时再改为 "8000:8000"（务必开启 security.authRequired）。
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
+    # 安全加固：只读根文件系统、丢弃全部 Linux capabilities、禁止提权
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # 容器内的 127.0.0.1 指向容器自身；访问宿主机上的 ComfyUI 请在 config.yaml 中
+    # 使用 http://host.docker.internal:8188（并让 ComfyUI 监听宿主机可达的地址）。
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # 如需使用自定义配置，取消注释以只读方式挂载（不要把 config.yaml 打进镜像）
+    # volumes:
+    #   - ./manifest/config/config.yaml:/app/manifest/config/config.yaml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8000/hello"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     env_file:
       - path: ./.env
         required: false

@@ -1,27 +1,32 @@
 # 构建阶段
-FROM golang:1.25-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 WORKDIR /app
 # 先复制依赖文件，利用 Docker 层缓存
 COPY go.mod go.sum ./
 RUN go mod download
 
-# 复制源码并编译
+# 复制源码并编译（.dockerignore 已排除 config.yaml、.env、日志等本地文件，避免把密钥打进镜像）
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o main .
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o main .
 
 # 运行阶段
-FROM alpine:3.19
+FROM alpine:3.22
 
 # 安装 ca-certificates 确保能够正常调用外部 HTTPS API（OpenAI / 火山方舟 / Google 等）
-RUN apk --no-cache add ca-certificates tzdata
+RUN apk --no-cache add ca-certificates tzdata \
+    && addgroup -S -g 10001 app \
+    && adduser -S -D -H -u 10001 -G app app
 
 WORKDIR /app
 COPY --from=builder /app/main .
-# 复制配置文件（优先保留本地 config.yaml；若不存在则由模板自动生成）
-COPY manifest/config/config*.yaml manifest/config/
+# 镜像内只放示例配置；真实 config.yaml 请在运行时以只读卷挂载到 /app/manifest/config/config.yaml，
+# 未挂载时程序会自动回退加载 config.example.yaml。
+COPY manifest/config/config.example.yaml manifest/config/
 COPY workflows workflows/
-RUN [ -f manifest/config/config.yaml ] || cp manifest/config/config.example.yaml manifest/config/config.yaml
 
+USER app:app
 EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD wget -q -O /dev/null http://127.0.0.1:8000/hello || exit 1
 CMD ["./main"]

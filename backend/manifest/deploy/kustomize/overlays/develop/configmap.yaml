@@ -6,9 +6,10 @@ data:
   config.yaml: |
     server:
       address:     ":8000"
-      openapiPath: "/api.json"
-      swaggerPath: "/swagger"
+      # 接口文档默认关闭；仅在内网调试环境需要时开启
+      # openapiPath: "/api.json"
+      # swaggerPath: "/swagger"
 
     logger:
-      level : "all"
+      level : "info"
       stdout: true

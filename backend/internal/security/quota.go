@@ -50,6 +50,29 @@ func (q *DailyQuotaTracker) CheckAndDeduct(principalID string) bool {
 	return true
 }
 
+// Refund 退还一次当日额度，用于请求在调用上游模型之前就被拒绝的情况（例如参数/配置错误）。
+func (q *DailyQuotaTracker) Refund(principalID string) {
+	if principalID == "" {
+		principalID = "anonymous"
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	key := principalID + ":" + time.Now().UTC().Format("2006-01-02")
+	if q.usage[key] > 0 {
+		q.usage[key]--
+	}
+}
+
+// Used 返回当日已用额度（测试与监控用）。
+func (q *DailyQuotaTracker) Used(principalID string) int {
+	if principalID == "" {
+		principalID = "anonymous"
+	}
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return q.usage[principalID+":"+time.Now().UTC().Format("2006-01-02")]
+}
+
 func (q *DailyQuotaTracker) cleanupLocked(now time.Time) {
 	todayStr := now.Format("2006-01-02")
 	yesterdayStr := now.AddDate(0, 0, -1).Format("2006-01-02")
