@@ -103,7 +103,7 @@ nvzhuang/
 ├── assets/                    # thumbs/、img/ 图片资源
 ├── tests/frontend_tryon_test.mjs  # 前端 Node 测试（从 index.html 抽取函数在 vm 中断言）
 ├── tests/search_test.mjs          # 搜索召回/性能回归（中文子串、英文与 ID 前缀）
-├── tests/frontend_small_wins_test.mjs # 生成记录保留（≤50 条）、Retry-After/网关错误映射、语言记忆、config.js 约束
+├── tests/frontend_small_wins_test.mjs # 生成记录保留（≤50 条）、Retry-After/网关错误映射、语言记忆、config.js 约束、存储禁用不崩溃与函数不重复定义
 ├── scripts/check.sh           # 本地质量门禁（AGENTS.md §3），.githooks/pre-commit 可选调用
 ├── docker-compose.yml         # 后端编排（仅绑定 127.0.0.1:8000、read_only、cap_drop）
 ├── deploy/                    # 生产叠加：docker-compose.prod.yml（Nginx 容器 + 固定网络 172.30.0.0/24）、nginx 模板与 JSON 错误页、
