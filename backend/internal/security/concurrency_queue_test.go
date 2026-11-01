@@ -164,3 +164,48 @@ func TestConcurrencyQueueStress(t *testing.T) {
 		t.Fatalf("结束后应清零: %d %d", a, w)
 	}
 }
+
+// 客户端已断开（ctx 已取消）时即使有空闲槽位也不得占用：否则控制器会继续扣额度并以已取消的 ctx 调用上游
+func TestConcurrencyCancelledContextNeverAcquires(t *testing.T) {
+	c := NewConcurrencyManager(1, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if rel, ok := c.AcquireWait(ctx, "a", time.Second); ok {
+		rel()
+		t.Fatal("已取消的 ctx 不应拿到空闲槽位")
+	}
+	if a, w := c.Stats(); a != 0 || w != 0 {
+		t.Fatalf("stats: %d %d", a, w)
+	}
+
+	// 排队中先取消、再释放槽位：排队者必须放弃，而不是抢到刚释放的槽位
+	rel, _ := c.Acquire("holder")
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	done := make(chan bool, 1)
+	go func() {
+		r, ok := c.AcquireWait(ctx2, "b", 5*time.Second)
+		if ok {
+			r()
+		}
+		done <- ok
+	}()
+	for {
+		if _, w := c.Stats(); w == 1 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	cancel2()
+	rel()
+	if <-done {
+		t.Fatal("ctx 取消后排队者不应拿到槽位")
+	}
+	if a, w := c.Stats(); a != 0 || w != 0 {
+		t.Fatalf("stats after cancel: %d %d", a, w)
+	}
+	if rel3, ok := c.Acquire("b"); !ok {
+		t.Fatal("放弃后单主体名额应归还")
+	} else {
+		rel3()
+	}
+}

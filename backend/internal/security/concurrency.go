@@ -49,6 +49,10 @@ func (c *ConcurrencyManager) AcquireWait(ctx context.Context, principalID string
 		principalID = "anonymous"
 	}
 
+	if ctx.Err() != nil {
+		return nil, false
+	}
+
 	c.mu.Lock()
 	if c.perPrincipalCounts[principalID] >= c.perPrincipal {
 		c.mu.Unlock()
@@ -72,13 +76,22 @@ func (c *ConcurrencyManager) AcquireWait(ctx context.Context, principalID string
 
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
+	timedOut := false
 	for {
 		c.mu.Lock()
-		if c.globalCount < c.globalLimit {
+		// ctx 已取消时不再占用槽位（即使恰好有空闲）；超时与释放同时发生时仍以空闲槽位为准
+		cancelled := ctx.Err() != nil
+		if !cancelled && c.globalCount < c.globalLimit {
 			c.globalCount++
 			c.waiting--
 			c.mu.Unlock()
 			return c.releaseFunc(principalID), true
+		}
+		if cancelled || timedOut {
+			c.waiting--
+			c.dropPrincipalLocked(principalID)
+			c.mu.Unlock()
+			return nil, false
 		}
 		if c.changed == nil {
 			c.changed = make(chan struct{})
@@ -88,22 +101,10 @@ func (c *ConcurrencyManager) AcquireWait(ctx context.Context, principalID string
 
 		select {
 		case <-ch:
-			continue
 		case <-timer.C:
+			timedOut = true
 		case <-ctx.Done():
 		}
-		c.mu.Lock()
-		// 超时与释放可能同时发生：放弃前再检查一次
-		if c.globalCount < c.globalLimit {
-			c.globalCount++
-			c.waiting--
-			c.mu.Unlock()
-			return c.releaseFunc(principalID), true
-		}
-		c.waiting--
-		c.dropPrincipalLocked(principalID)
-		c.mu.Unlock()
-		return nil, false
 	}
 }
 
