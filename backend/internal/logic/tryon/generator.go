@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -235,13 +236,13 @@ func getKey(envName, cfgPath string) string {
 	return g.Cfg().MustGet(context.Background(), cfgPath).String()
 }
 
-// lookupEnv 兼容多个环境变量名（大小写不敏感地查找首个非空值）
+// lookupEnv 依次查找多个环境变量名，返回首个非空值
 func lookupEnv(names ...string) string {
 	for _, n := range names {
 		if n == "" {
 			continue
 		}
-		if v := osGetenv(n); v != "" {
+		if v := os.Getenv(n); v != "" {
 			return v
 		}
 	}

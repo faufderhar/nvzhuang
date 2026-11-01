@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 )
@@ -274,18 +273,11 @@ func (o *OpenAIImages) downloadImage(ctx context.Context, url string) (string, e
 // ensureBase64 兼容：如果传入的是 data URL，去掉前缀
 func ensureBase64(s string) string {
 	if len(s) > 22 && s[:5] == "data:" {
-		if idx := bytes.IndexByte([]byte(s), ','); idx >= 0 {
+		if idx := strings.IndexByte(s, ','); idx >= 0 {
 			return s[idx+1:]
 		}
 	}
 	return s
-}
-
-// decodeB64 辅助：校验 base64 合法性
-func decodeB64(s string) error {
-	s = ensureBase64(s)
-	_, err := base64.StdEncoding.DecodeString(s)
-	return err
 }
 
 // truncate 截断字符串，避免错误信息过长
@@ -302,15 +294,10 @@ func normalizeOpenAISize(size string) string {
 	switch size {
 	case "1024x1024", "1536x1024", "1024x1536", "auto":
 		return size
-	case "", "1024x1792", "1792x1024":
-		return "1024x1536"
-	default:
+	default: // 含空值与 1024x1792 / 1792x1024 等不支持的尺寸
 		return "1024x1536"
 	}
 }
-
-// osGetenv 读取环境变量
-func osGetenv(name string) string { return os.Getenv(name) }
 
 // encodeB64 字节转标准 base64
 func encodeB64(data []byte) string { return base64.StdEncoding.EncodeToString(data) }

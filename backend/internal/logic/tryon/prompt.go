@@ -9,11 +9,6 @@ func BuildGPTSafety(lang string) string {
 	return gptSafetyEnPrompt
 }
 
-// BuildGPT 构建 GPT-Image 的提示词（默认指向安全防封控模板）
-func BuildGPT(lang string) string {
-	return BuildGPTSafety(lang)
-}
-
 // BuildGemini 构建 Gemini（Nano Banana 2）图像模型的提示词（保留原提示词）
 func BuildGemini(lang string) string {
 	// Gemini 对中英文都支持良好，但换装任务英文指令更稳定

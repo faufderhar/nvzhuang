@@ -91,15 +91,6 @@ func isForbiddenAddr(addr netip.Addr) bool {
 	return false
 }
 
-// isForbiddenClientIP 兼容 net.IP 的包装。
-func isForbiddenClientIP(ip net.IP) bool {
-	addr, ok := netip.AddrFromSlice(ip)
-	if !ok {
-		return true
-	}
-	return isForbiddenAddr(addr)
-}
-
 // clientAllowedPorts 浏览器自定义模型地址允许的端口，默认仅 HTTPS 默认端口 443；
 // 启动时可通过 security.clientModelAllowedPorts 调整（SetClientAllowedPorts）。
 var clientAllowedPorts atomic.Pointer[map[string]bool]
