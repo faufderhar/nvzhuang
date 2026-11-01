@@ -196,8 +196,8 @@ for (const key of ['retryAfterSuffix', 'retryCountdown', 'retryReady', 'aiGatewa
   assert.ok(!/sk-|AIza|Bearer/.test(configJs.replace(/^\/\/.*$/gm, '')));
   const cfgIdx = html.indexOf('<script src="config.js"></script>');
   assert.ok(cfgIdx > 0 && cfgIdx < html.indexOf('<script src="data.js"></script>'), 'config.js 应在 data.js 之前加载');
-  // CSP 未放宽
-  assert.ok(html.includes("script-src 'self' 'unsafe-inline';"));
+  // CSP 未放宽：script-src 只允许同源与内联脚本哈希（详见 tests/csp_test.mjs）
+  assert.match(html, /script-src 'self'( 'sha256-[A-Za-z0-9+/=]+')+;/);
 
   const ctx = run([fn('isLoopbackHost'), fn('sanitizeConfiguredApi'), 'globalThis.f = sanitizeConfiguredApi;'].join('\n'),
     { location: { origin: 'https://site.example', hostname: 'site.example' } });

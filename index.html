@@ -4,8 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<!-- 内容安全策略：禁止加载第三方脚本/插件/表单目标；connect-src 允许 https 与本机回环，以支持用户自定义的试穿后端。 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:* data: blob:; media-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; worker-src 'none'; manifest-src 'self'">
+<!-- 内容安全策略：禁止加载第三方脚本/插件/表单目标；script-src 不允许 'unsafe-inline'，内联脚本按 sha256 哈希放行（修改内联脚本后运行 node scripts/csp-hashes.mjs --write）；connect-src 允许 https 与本机回环，以支持用户自定义的试穿后端。 -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-YxN5Z76KWV8TB2ee703P7Byd9UbTH82Ym1eww61avWs=' 'sha256-tttIjPINOR0K30IlUcU3rx6TdTVYwQCMQh2SVgH4Y18='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:* data: blob:; media-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; worker-src 'none'; manifest-src 'self'">
 <meta name="description" content="拍片哥女装 (COSTUME-DB-01) — AI 服装参考图集，收录 1407 套高品质服装图片（2:3），支持一键 AI 试穿换装与中英文双向检索。">
 <title>拍片哥女装 · AI 服装参考图集</title>
 <script>
