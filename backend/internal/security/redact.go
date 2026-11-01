@@ -18,6 +18,10 @@ var redactPatterns = []struct {
 	{regexp.MustCompile(`AIza[A-Za-z0-9_-]{20,}`), "[REDACTED_KEY]"},
 	{regexp.MustCompile(`\bAIza[A-Za-z0-9_*-]{10,}`), "[REDACTED_KEY]"},
 	{regexp.MustCompile(`(?i)\b(api[_-]?key|access[_-]?key|secret|token|password|authorization|x-goog-api-key)(["'\s:=]+)[^\s"',;&]+`), "$1$2[REDACTED]"},
+	// 个人信息：上游错误体可能回显账号邮箱或手机号，日志中一律打码
+	{regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`), "[EMAIL]"},
+	{regexp.MustCompile(`\+\d{1,3}[\s-]?\d{2,4}(?:[\s-]?\d{2,4}){2,3}\b`), "[PHONE]"},
+	{regexp.MustCompile(`\b1[3-9]\d{9}\b`), "[PHONE]"},
 	// URL（可能包含用户自定义 Base URL 或带签名的结果地址）
 	{regexp.MustCompile(`(?i)\b[a-z][a-z0-9+.-]*://[^\s"'<>]+`), "[URL]"},
 	// IPv4 / IPv6 地址
@@ -27,7 +31,7 @@ var redactPatterns = []struct {
 	{regexp.MustCompile(`[A-Za-z0-9+/_=-]{40,}`), "[REDACTED_BLOB]"},
 }
 
-// RedactSecrets 对准备写入服务端日志的文本做脱敏：移除密钥、URL、IP、长串 base64，
+// RedactSecrets 对准备写入服务端日志的文本做脱敏：移除密钥、邮箱、手机号、URL、IP、长串 base64，
 // 并额外替换调用方明确传入的敏感值（如本次请求的 API Key），最后截断到 300 字符。
 // 返回值只用于日志，绝不回显给客户端。
 func RedactSecrets(s string, sensitive ...string) string {
