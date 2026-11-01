@@ -1,7 +1,6 @@
 package middleware
 
 import (
-	"context"
 	"net/http"
 	"net/netip"
 	"strings"
@@ -16,25 +15,12 @@ type AuthMiddleware struct {
 	trustedProxies []netip.Prefix
 }
 
-func NewAuthMiddleware(store *security.TokenStore) *AuthMiddleware {
-	return &AuthMiddleware{tokenStore: store}
-}
-
 // NewAuthMiddlewareWithProxies 创建鉴权中间件，并指定可信反向代理（仅这些代理传来的 X-Forwarded-For 会被采信）。
 func NewAuthMiddlewareWithProxies(store *security.TokenStore, trustedProxies []netip.Prefix) *AuthMiddleware {
 	return &AuthMiddleware{tokenStore: store, trustedProxies: trustedProxies}
 }
 
-// Handler 按规范化路径判断是否需要鉴权（//tryon、/tryon/ 等写法同样受保护），可挂在全局路由组上。
-func (m *AuthMiddleware) Handler(r *ghttp.Request) {
-	if r.Method == http.MethodOptions || !IsProtectedPath(r.URL.Path) {
-		r.Middleware.Next()
-		return
-	}
-	m.Enforce(r)
-}
-
-// Enforce 无条件执行鉴权，用于直接挂在受保护的路由组上。
+// Enforce 无条件执行鉴权，直接挂在受保护的路由组上（GoFrame 路由已合并 //tryon 等写法）。
 func (m *AuthMiddleware) Enforce(r *ghttp.Request) {
 	if r.Method == http.MethodOptions {
 		r.Middleware.Next()
@@ -72,8 +58,6 @@ func (m *AuthMiddleware) Enforce(r *ghttp.Request) {
 		}
 	}
 	r.SetCtxVar(CtxPrincipalID, principalID)
-	ctx := context.WithValue(r.Context(), CtxPrincipalID, principalID)
-	r.SetCtx(ctx)
 
 	r.Middleware.Next()
 }

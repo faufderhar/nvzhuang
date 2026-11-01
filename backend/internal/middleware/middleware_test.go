@@ -111,11 +111,11 @@ func TestAuthMiddleware(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	authMw := NewAuthMiddleware(store)
+	authMw := NewAuthMiddlewareWithProxies(store, nil)
 
 	s := g.Server(uniqueServerName("test-auth-mw"))
 	s.Group("/", func(group *ghttp.RouterGroup) {
-		group.Middleware(RequestID, authMw.Handler)
+		group.Middleware(RequestID, authMw.Enforce)
 		group.POST("/tryon", func(r *ghttp.Request) {
 			r.Response.Write("success")
 		})
@@ -188,7 +188,7 @@ func TestBodyLimitMiddleware(t *testing.T) {
 
 	s := g.Server(uniqueServerName("test-body-limit"))
 	s.Group("/", func(group *ghttp.RouterGroup) {
-		group.Middleware(RequestID, limitMw.Handler)
+		group.Middleware(RequestID, limitMw.Enforce)
 		group.POST("/tryon", func(r *ghttp.Request) {
 			r.Response.Write("body received")
 		})
@@ -230,7 +230,7 @@ func TestRateLimitMiddleware(t *testing.T) {
 
 	s := g.Server(uniqueServerName("test-rate-limit-mw"))
 	s.Group("/", func(group *ghttp.RouterGroup) {
-		group.Middleware(RequestID, rlMw.Handler)
+		group.Middleware(RequestID, rlMw.Enforce)
 		group.POST("/tryon", func(r *ghttp.Request) {
 			r.Response.Write("ok")
 		})
@@ -279,16 +279,19 @@ func TestRateLimitMiddleware(t *testing.T) {
 	}
 }
 
-func TestNormalizePathAndProtected(t *testing.T) {
-	for _, p := range []string{"/tryon", "//tryon", "///tryon", "//tryon/", "/tryon/", "/./tryon", "/x/../tryon", "/TRYON", "\\tryon", "/comfyui//health", "//comfyui/health/"} {
-		if !IsProtectedPath(p) {
-			t.Fatalf("expected %q to be protected", p)
+func TestNormalizePathAndTryon(t *testing.T) {
+	for _, p := range []string{"/tryon", "//tryon", "///tryon", "//tryon/", "/tryon/", "/./tryon", "/x/../tryon", "/TRYON", "\\tryon"} {
+		if !IsTryonPath(p) {
+			t.Fatalf("expected %q to be the tryon path", p)
 		}
 	}
-	for _, p := range []string{"/", "/hello", "/tryonx", "/api/tryon"} {
-		if IsProtectedPath(p) {
-			t.Fatalf("expected %q to be public", p)
+	for _, p := range []string{"/", "/hello", "/tryonx", "/api/tryon", "/comfyui/health"} {
+		if IsTryonPath(p) {
+			t.Fatalf("expected %q not to be the tryon path", p)
 		}
+	}
+	if NormalizePath("//comfyui//health/") != "/comfyui/health" {
+		t.Fatal("NormalizePath should collapse slashes")
 	}
 }
 

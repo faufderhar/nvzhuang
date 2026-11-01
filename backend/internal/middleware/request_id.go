@@ -1,10 +1,6 @@
 package middleware
 
-import (
-	"context"
-
-	"github.com/gogf/gf/v2/net/ghttp"
-)
+import "github.com/gogf/gf/v2/net/ghttp"
 
 const maxRequestIDLength = 64
 
@@ -30,9 +26,7 @@ func RequestID(r *ghttp.Request) {
 		reqID = GenerateRequestID()
 	}
 	r.Response.Header().Set("X-Request-ID", reqID)
-	r.SetCtxVar(CtxRequestID, reqID)
-	ctx := context.WithValue(r.Context(), CtxRequestID, reqID)
-	r.SetCtx(ctx)
+	r.SetCtxVar(CtxRequestID, reqID) // 同时写入 r.Context()，下游 ctx.Value 可直接读取
 
 	r.Middleware.Next()
 }
