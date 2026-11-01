@@ -151,8 +151,20 @@ server {
     # 合并重复斜杠（//tryon → /tryon），与后端的路径规范化保持一致
     merge_slashes on;
 
-    # 大图片 base64 请求体：需 ≥ 后端 security.maxRequestBodyBytes（默认 24 MiB）
-    client_max_body_size 30m;
+    # 只有 /tryon 需要大请求体；其它路径保持很小，避免任意路径都能让网关缓冲大请求
+    client_max_body_size 64k;
+
+    # 生图接口：正则同时覆盖 /tryon/、//tryon 等写法；请求体需 ≥ 后端 security.maxRequestBodyBytes（默认 24 MiB）
+    location ~ ^/tryon/*$ {
+        client_max_body_size 30m;
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
 
     location / {
         proxy_pass http://127.0.0.1:8000;
@@ -182,7 +194,7 @@ security:
 >
 > Docker 发布的端口会绕过 ufw 等主机防火墙，生产环境不要给后端发布端口。
 
-生产 Nginx 模板（`deploy/nginx/templates/nvzhuang.conf.template`）在 Nginx 自身拦截请求时返回与后端同结构的 JSON：413 → `41300 REQUEST_TOO_LARGE`、429 → `42900 RATE_LIMITED`（`Retry-After: 10`）、502/503 → `50200 GATEWAY_ERROR`、504 → `50400 GATEWAY_TIMEOUT`；后端返回的 JSON 错误原样透传。
+生产 Nginx 模板（`deploy/nginx/templates/nvzhuang.conf.template`）另外配置了 80/443 `default_server` 兜底（未知 Host / 无 SNI 直接 444）、只在 IPv4 上发布端口、请求体临时文件落盘，见 [`deploy/README.md`](../deploy/README.md)。模板在 Nginx 自身拦截请求时返回与后端同结构的 JSON：413 → `41300 REQUEST_TOO_LARGE`、429 → `42900 RATE_LIMITED`（`Retry-After: 10`）、502/503 → `50200 GATEWAY_ERROR`、504 → `50400 GATEWAY_TIMEOUT`；后端返回的 JSON 错误原样透传。
 
 ## 五、安全与成本控制防护（公网部署必读）
 
@@ -282,7 +294,9 @@ node ../tests/frontend_tryon_test.mjs
 - **鉴权**：熟人使用也要开启 `authRequired: true`，每人一个随机 Token（`openssl rand -hex 32`），通过 `TRYON_API_KEYS` 注入；
 - **可信代理**：`trustedProxies: ["172.30.0.2/32"]`，不要写 `127.0.0.1` / 网关 / 整个 Docker 网段（见第四节说明）；
 - **超时链**：模型 180s < Nginx `proxy_read_timeout` 300s；停机 `timeoutSeconds` 190s ≥ 模型 + 5s；`stop_grace_period` 200s ≥ drainDelay + 停机超时；
-- **请求缓冲**：Nginx `proxy_request_buffering on` + `client_max_body_size 30m`，慢速上传不会占用后端并发槽；
+- **请求缓冲**：Nginx `proxy_request_buffering on`，只有 `/tryon` 允许 30m 请求体（其它路径 64k），超过 1 MB 的部分写入磁盘卷 `nginx-body-temp`；慢速上传不会占用后端并发槽；
+- **解析前门禁**：后端 `TryonGate` 在解析 JSON / 解码图片之前校验 `Content-Type: application/json` 并占用并发槽位，同一 Token 的并发大请求不会先把内存放大再被拒绝；
+- **仅 IPv4 发布**：compose 以 `0.0.0.0:80/443` 发布，IPv6 入站不会被 docker-proxy 变成网关地址 `172.30.0.1`（否则所有 IPv6 用户共用限流桶、并能访问探针）；
 - **安全头**：HSTS、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、`Permissions-Policy`、API 响应 `Content-Security-Policy: default-src 'none'`，并隐藏 Nginx 版本；
 - **额度持久化**：`stateDir: /app/data`（compose 的 `tryon-state` 卷），重启后每日额度不清零；
 - **容量**：4c24g 建议全局并发 6、排队 10s、`GOMEMLIMIT=2GiB`、容器 3 GiB 上限（见第五节第 3 条的实测数据）。

@@ -51,7 +51,7 @@ Nginx 容器 costume-tryon-nginx 172.30.0.2（唯一发布 80/443 的服务）
 | `SSH_PORT` | 可选 | SSH 端口，默认 `22`；改端口须同时放行云厂商安全组 | `22` |
 | `HOST_TIMEZONE` | 可选 | 默认 `UTC` | `UTC` |
 | `REPO_URL` | 必填 | 仓库 Git 地址（HTTPS） | `https://github.com/<owner>/nvzhuang.git` |
-| `DEPLOY_REF` | 必填 | 要部署的 **tag 或完整 commit SHA**（不要用分支名）；必须包含 `deploy/FIRST-INSTALL.md` 与 `deploy/verify.sh` | `v1.2.0` 或 40 位 SHA |
+| `DEPLOY_REF` | 必填 | 要部署的 **tag 或完整 commit SHA**（不要用分支名）；必须包含 `deploy/FIRST-INSTALL.md` 与 `deploy/verify.sh`；应使用包含 2026-11-01 安全修复（`fix/security-audit` 合并后）的 tag/SHA | `v1.2.0` 或 40 位 SHA |
 | `CERT_MODE` | 必填 | `letsencrypt`（自动签发，推荐）或 `existing`（用户提供证书文件） | `letsencrypt` |
 | `CERT_EMAIL` | `letsencrypt` 时必填 | Let's Encrypt 到期通知邮箱 | `ops@example.com` |
 | `MODELS` | 必填 | 启用的模型名，空格分隔，取值 `gemini` `gpt-image` `doubao`（与前端选项同名），至少一个 | `gemini gpt-image` |
@@ -137,7 +137,7 @@ getent ahostsv6 "$API_DOMAIN" | grep -v '::ffff:' | awk '{print $1}' | sort -u
 预期：第一条**只输出** `SERVER_PUBLIC_IP`；第二条**无输出**。
 
 - A 记录不对：请用户修正 DNS 后等待生效再继续（Let's Encrypt HTTP-01 依赖它）。
-- 存在 AAAA：请用户删除。原因：Nginx 容器没有 IPv6 地址，经 IPv6 进来的连接会被 Docker 的用户态代理转成网关地址 `172.30.0.1`，导致所有 IPv6 用户共用同一个限流/额度桶，且能访问只对内网开放的 `/healthz`、`/readyz`。
+- 存在 AAAA：请用户删除。原因：生产 compose 只在 IPv4 上发布 80/443（Nginx 容器没有 IPv6 地址，若发布 IPv6，连接会被 Docker 的用户态代理转成网关地址 `172.30.0.1`，导致所有 IPv6 用户共用同一个限流/额度桶，且能访问只对本机开放的 `/healthz`、`/readyz`），有 AAAA 时 IPv6 客户端会先连接失败再回退 IPv4。
 
 ### 2.5 出站连通性
 
@@ -561,7 +561,7 @@ sudo docker logs costume-tryon-backend 2>&1 | tail -n 20
 预期：
 - 构建成功（后端镜像 `nvzhuang-costume-tryon`，基于 `golang:1.26-alpine` 构建、`alpine:3.22` 运行）；
 - 3 分钟内打印 `healthy healthy`；
-- `dc ps` 中 `costume-tryon-backend` 的 PORTS 为空，`costume-tryon-nginx` 为 `0.0.0.0:80->80/tcp, [::]:80->80/tcp, 0.0.0.0:443->443/tcp, [::]:443->443/tcp`（显示格式可能略有不同，但只能有 80/443）；
+- `dc ps` 中 `costume-tryon-backend` 的 PORTS 为空，`costume-tryon-nginx` 为 `0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp`（显示格式可能略有不同，但只能有 80/443，且**不能**出现 `[::]`）；
 - 后端日志没有 `【部署告警】`、没有 `环境变量 TRYON_API_KEYS 中包含示例/占位 Token`、没有 `permission denied`。
 
 后端反复重启或 `up -d` 卡在等待后端健康：看 `sudo docker logs costume-tryon-backend`，按 §12 处理。
@@ -817,12 +817,13 @@ sudo env API_DOMAIN="$API_DOMAIN" FRONTEND_ORIGIN="$FRONTEND_ORIGIN" FRONTEND_UR
 | `401 40101 AUTH_REQUIRED` / `40102 AUTH_INVALID` | 未带 Token / Token 不在 `TRYON_API_KEYS` 中 | 确认用户填写的 Token 来自 `/etc/nvzhuang/tokens.tsv`；改 `.env` 后需 `dc up -d` |
 | `429 42900`（`Retry-After: 10`） | Nginx 按 IP 限流（`/tryon` 20 次/分、突发 5、单 IP 并发 2） | 正常保护；如需调整改模板后 `dc up -d --force-recreate nginx` |
 | `429 42901` / `42902` / `42903` | 后端令牌桶（10 次/分、突发 3）/ 每日额度（100 次，UTC 0 点重置）/ 并发（全局 6、每人 1，`Retry-After: 5`） | 正常保护；按需调整 `config.yaml` 的 `security.rateLimit` / `concurrency` |
-| 所有用户共用一个限流桶，或公网能访问 `/readyz` | 存在 AAAA 记录，IPv6 连接被 Docker 用户态代理转成 `172.30.0.1`；或后端被发布了端口 | 删除 AAAA（§2.4）；`dc ps` 确认后端无端口 |
+| 所有用户共用一个限流桶，或公网能访问 `/readyz` | Nginx 被改成同时发布 IPv6（`[::]:80/443`），IPv6 连接被 Docker 用户态代理转成 `172.30.0.1`；或后端被发布了端口 | 恢复 compose 中的 `0.0.0.0:` 端口写法并删除 AAAA（§2.4）；`dc ps` 确认后端无端口 |
+| 用 IP 或其它域名访问时连接被直接断开 | 正常：80/443 的 `default_server` 对未知 Host / 无 SNI 返回 444 | 用 API 域名访问 |
 | 日志出现 `【部署告警】收到来自私有地址 ...` | 有流量绕过 Nginx 直达后端，或 `trustedProxies` 被改 | 恢复 `trustedProxies: ["172.30.0.2/32"]`，确认后端无端口映射 |
 | `502 50200 GATEWAY_ERROR` | 后端未运行/重启中 | `dc ps`、`sudo docker logs costume-tryon-backend` |
 | `502 UPSTREAM_FAILED` | 模型 Key 无效、余额不足、上游超时或网络不通 | 看后端日志（已脱敏）；§2.5 检查出站 |
 | `504 50400 GATEWAY_TIMEOUT` | 单次生成超过 Nginx `proxy_read_timeout 300s` | 正常情况下后端 180 秒先超时；持续出现说明上游极慢，换模型或稍后重试 |
-| `413 41300 REQUEST_TOO_LARGE` | 请求体 > 30 MB（Nginx）或 > 24 MiB（后端 41301） | 前端会自动勾选「上传前压缩」，让用户重试 |
+| `413 41300 REQUEST_TOO_LARGE` | `/tryon` 请求体 > 30 MB、其它路径 > 64 KB（Nginx），或 > 24 MiB（后端 41301） | 前端会自动勾选「上传前压缩」，让用户重试 |
 | 出现 `quota.db.corrupt-<时间>` | 额度库损坏后被自动重建（当天计数归零） | 检查磁盘与异常断电；无需其他处理 |
 | verify.sh 某项因 429 失败 | 短时间内重复运行，被自己的限流命中 | 等 1 分钟后重跑 |
 
