@@ -19,8 +19,6 @@ import (
 	"time"
 )
 
-const comfyMaxResponseBytes = 64 << 20
-
 // ComfyUI 使用服务端固定的 API 工作流调用本机 ComfyUI。
 // Base URL、工作流路径和节点 ID 只能来自后端配置，不能由浏览器请求覆盖。
 type ComfyUI struct {
@@ -492,7 +490,7 @@ func (c *ComfyUI) downloadImage(ctx context.Context, image comfyImageRef) ([]byt
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("无法读取 ComfyUI 结果图片")
 	}
-	data, err := io.ReadAll(io.LimitReader(resp.Body, comfyMaxResponseBytes))
+	data, err := readLimited(resp.Body, modelMaxResponseBytes)
 	if err != nil || len(data) == 0 {
 		return nil, fmt.Errorf("ComfyUI 结果图片无效")
 	}
@@ -513,7 +511,7 @@ func (c *ComfyUI) getJSON(ctx context.Context, path string) ([]byte, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status")
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, comfyMaxResponseBytes))
+	return readLimited(resp.Body, modelMaxResponseBytes)
 }
 
 func (c *ComfyUI) loadWorkflow() (map[string]interface{}, error) {
