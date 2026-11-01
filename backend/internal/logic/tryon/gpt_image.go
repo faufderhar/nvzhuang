@@ -39,33 +39,14 @@ func NewOpenAIImages(cfg *ModelConfig) *OpenAIImages {
 
 func (o *OpenAIImages) Name() string { return o.name }
 
-// gptImageRequest 图片生成请求体。
-// 同时兼容两种协议：
-//   - prompt + image[]（火山方舟 / 多数 OpenAI 兼容中转站的多图生图格式，换装必须用这个）
-//   - input 数组（OpenAI 官方 gpt-image 格式，作为兜底）
+// gptImageRequest 图片生成请求体：prompt + image[]
+// （火山方舟 / 多数 OpenAI 兼容中转站的多图生图格式，换装必须用这个）。
 type gptImageRequest struct {
-	Model   string          `json:"model"`
-	Prompt  string          `json:"prompt,omitempty"`
-	Image   []string        `json:"image,omitempty"`
-	Input   []gptImageInput `json:"input,omitempty"`
-	Size    string          `json:"size,omitempty"`
-	Quality string          `json:"quality,omitempty"`
-	N       int             `json:"n,omitempty"`
-}
-
-type gptImageInput struct {
-	Role    string            `json:"role"`
-	Content []gptImageContent `json:"content"`
-}
-
-type gptImageContent struct {
-	Type     string    `json:"type"`
-	Text     string    `json:"text,omitempty"`
-	ImageURL *imageURL `json:"image_url,omitempty"`
-}
-
-type imageURL struct {
-	URL string `json:"url"`
+	Model   string   `json:"model"`
+	Prompt  string   `json:"prompt,omitempty"`
+	Image   []string `json:"image,omitempty"`
+	Size    string   `json:"size,omitempty"`
+	Quality string   `json:"quality,omitempty"`
 }
 
 // gptImageResponse OpenAI Images API 响应
@@ -219,19 +200,25 @@ func (o *OpenAIImages) Generate(ctx context.Context, personB64, garmentB64, prom
 		Quality: "high",
 	}
 
+	return postImageGeneration(ctx, o.client, o.baseURL, o.apiKey, reqBody, "图像 API", o.resultOrigin)
+}
+
+// postImageGeneration 调用 POST {baseURL}/images/generations 并取出结果图（优先 b64_json，其次下载 url）。
+// label 用于错误信息前缀，如「图像 API」「豆包 API」。
+func postImageGeneration(ctx context.Context, client *http.Client, baseURL, apiKey string, reqBody any, label, resultOrigin string) (string, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", o.baseURL+"/images/generations", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/images/generations", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("模型服务请求创建失败")
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+o.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
-	resp, err := o.client.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("无法连接模型服务")
 	}
@@ -242,7 +229,7 @@ func (o *OpenAIImages) Generate(ctx context.Context, personB64, garmentB64, prom
 		return "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("图像 API 错误 (status %d): %s", resp.StatusCode, truncate(string(respBody), 300))
+		return "", fmt.Errorf("%s 错误 (status %d): %s", label, resp.StatusCode, truncate(string(respBody), 300))
 	}
 
 	var result gptImageResponse
@@ -250,24 +237,18 @@ func (o *OpenAIImages) Generate(ctx context.Context, personB64, garmentB64, prom
 		return "", err
 	}
 	if result.Error != nil {
-		return "", fmt.Errorf("图像 API 错误: %s", result.Error.Message)
+		return "", fmt.Errorf("%s 错误: %s", label, result.Error.Message)
 	}
 	if len(result.Data) == 0 {
-		return "", fmt.Errorf("图像 API 未返回图片")
+		return "", fmt.Errorf("%s 未返回图片", label)
 	}
-	// 优先 b64_json，其次 url（部分服务商返回 URL）
 	if result.Data[0].B64JSON != "" {
 		return result.Data[0].B64JSON, nil
 	}
 	if result.Data[0].URL != "" {
-		return o.downloadImage(ctx, result.Data[0].URL)
+		return downloadResultImage(ctx, result.Data[0].URL, resultOrigin)
 	}
-	return "", fmt.Errorf("图像 API 返回格式无法解析")
-}
-
-// downloadImage 下载 URL 图片并转 base64（部分服务商只返回 URL）
-func (o *OpenAIImages) downloadImage(ctx context.Context, url string) (string, error) {
-	return downloadResultImage(ctx, url, o.resultOrigin)
+	return "", fmt.Errorf("%s 返回格式无法解析", label)
 }
 
 // ensureBase64 兼容：如果传入的是 data URL，去掉前缀

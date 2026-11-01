@@ -558,41 +558,42 @@ func (c *ComfyUI) validateWorkflow(workflow map[string]interface{}) error {
 	return nil
 }
 
-func setComfyInput(workflow map[string]interface{}, nodeID, field string, value interface{}) error {
+// comfyInputs 取固定工作流中指定节点的 inputs。
+func comfyInputs(workflow map[string]interface{}, nodeID string) (map[string]interface{}, error) {
 	rawNode, ok := workflow[nodeID]
 	if !ok {
-		return fmt.Errorf("ComfyUI 固定工作流节点不存在")
+		return nil, fmt.Errorf("ComfyUI 固定工作流节点不存在")
 	}
 	node, ok := rawNode.(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("ComfyUI 固定工作流节点格式错误")
+		return nil, fmt.Errorf("ComfyUI 固定工作流节点格式错误")
 	}
 	inputs, ok := node["inputs"].(map[string]interface{})
 	if !ok {
-		return fmt.Errorf("ComfyUI 固定工作流输入格式错误")
+		return nil, fmt.Errorf("ComfyUI 固定工作流输入格式错误")
+	}
+	return inputs, nil
+}
+
+func setComfyInput(workflow map[string]interface{}, nodeID, field string, value interface{}) error {
+	inputs, err := comfyInputs(workflow, nodeID)
+	if err != nil {
+		return err
 	}
 	inputs[field] = value
 	return nil
 }
 
 func setComfySeed(workflow map[string]interface{}, nodeID string, seed int64) error {
-	rawNode, ok := workflow[nodeID]
-	if !ok {
-		return fmt.Errorf("ComfyUI 固定工作流节点不存在")
-	}
-	node, ok := rawNode.(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("ComfyUI 固定工作流节点格式错误")
-	}
-	inputs, ok := node["inputs"].(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("ComfyUI 固定工作流输入格式错误")
+	inputs, err := comfyInputs(workflow, nodeID)
+	if err != nil {
+		return err
 	}
 	if _, ok := inputs["seed"]; ok {
 		inputs["seed"] = seed
-		return nil
+	} else {
+		inputs["noise_seed"] = seed
 	}
-	inputs["noise_seed"] = seed
 	return nil
 }
 
