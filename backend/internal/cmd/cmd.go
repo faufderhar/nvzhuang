@@ -109,6 +109,7 @@ func RegisterRoutes(s *ghttp.Server, secService *security.Service, maxBodyBytes 
 	bodyLimitMw := middleware.NewBodyLimitMiddleware(maxBodyBytes)
 	authMw := middleware.NewAuthMiddlewareWithProxies(secService.TokenStore, secService.TrustedProxies)
 	rateLimitMw := middleware.NewRateLimitMiddleware(secService.RateLimiter)
+	tryonGate := middleware.NewTryonGate(secService)
 
 	// GoFrame 默认 ClientMaxBodySize 为 8MB，会在业务中间件之前以 500 纯文本拒绝请求；
 	// 这里设为业务上限 + 余量，保证超限请求统一返回 413 REQUEST_TOO_LARGE。
@@ -123,11 +124,13 @@ func RegisterRoutes(s *ghttp.Server, secService *security.Service, maxBodyBytes 
 		group.Bind(hello.NewV1())
 
 		// 受保护的业务接口：/tryon、/comfyui/health
+		// 顺序：请求体上限 → 鉴权 → 限流 → TryonGate（JSON 类型 + 并发槽位，均在解析请求体之前）
 		group.Group("/", func(protected *ghttp.RouterGroup) {
 			protected.Middleware(
 				bodyLimitMw.Enforce,
 				authMw.Enforce,
 				rateLimitMw.Enforce,
+				tryonGate.Enforce,
 			)
 			protected.Bind(tryon.NewV1())
 		})

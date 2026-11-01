@@ -36,6 +36,13 @@ func newRoutesTestServerWith(t *testing.T, name string, extra func(s *ghttp.Serv
 
 func newRoutesTestServerOpts(t *testing.T, name string, authRequired bool, burst int, maxBody int64, trustedProxies []string, extra func(s *ghttp.Server)) string {
 	t.Helper()
+	url, _ := newRoutesTestServerSvc(t, name, authRequired, burst, maxBody, trustedProxies, extra)
+	return url
+}
+
+// newRoutesTestServerSvc 同 newRoutesTestServerOpts，额外返回安全服务实例，便于测试直接操作并发/配额状态。
+func newRoutesTestServerSvc(t *testing.T, name string, authRequired bool, burst int, maxBody int64, trustedProxies []string, extra func(s *ghttp.Server)) (string, *security.Service) {
+	t.Helper()
 	envKey := "TEST_ROUTES_KEYS_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
 	os.Setenv(envKey, routesTestToken)
 	t.Cleanup(func() { os.Unsetenv(envKey) })
@@ -69,7 +76,7 @@ func newRoutesTestServerOpts(t *testing.T, name string, authRequired bool, burst
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = s.Shutdown() })
-	return "http://127.0.0.1:" + strings.Split(s.GetListenedAddress(), ":")[1]
+	return "http://127.0.0.1:" + strings.Split(s.GetListenedAddress(), ":")[1], svc
 }
 
 func doReq(t *testing.T, method, url string, body io.Reader, headers map[string]string) (int, apiErrBody) {
