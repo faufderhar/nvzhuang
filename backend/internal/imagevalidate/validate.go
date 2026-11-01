@@ -2,9 +2,7 @@ package imagevalidate
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"image"
 	_ "image/jpeg"
 	_ "image/png"
@@ -21,7 +19,6 @@ type ValidatedImage struct {
 	MIME   string
 	Width  int
 	Height int
-	SHA256 string
 }
 
 func ValidateImage(input string, limits ImageLimits) (*ValidatedImage, error) {
@@ -102,16 +99,11 @@ func ValidateImage(input string, limits ImageLimits) (*ValidatedImage, error) {
 		return nil, security.ErrImagePixelLimitExceeded
 	}
 
-	// 9. 计算 SHA-256 摘要前缀（用于脱敏追踪与缓存标识）
-	sum := sha256.Sum256(data)
-	sha256Prefix := hex.EncodeToString(sum[:8])
-
 	return &ValidatedImage{
 		Data:   data,
 		MIME:   realMIME,
 		Width:  cfg.Width,
 		Height: cfg.Height,
-		SHA256: sha256Prefix,
 	}, nil
 }
 

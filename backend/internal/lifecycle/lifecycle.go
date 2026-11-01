@@ -47,12 +47,10 @@ const checkTimeout = 2 * time.Second
 func (p *Probe) Ready(ctx context.Context) (bool, map[string]string) {
 	p.mu.RLock()
 	names := make([]string, 0, len(p.checks))
-	for n := range p.checks {
-		names = append(names, n)
-	}
 	checks := make(map[string]CheckFunc, len(p.checks))
-	for k, v := range p.checks {
-		checks[k] = v
+	for n, fn := range p.checks {
+		names = append(names, n)
+		checks[n] = fn
 	}
 	p.mu.RUnlock()
 	sort.Strings(names)

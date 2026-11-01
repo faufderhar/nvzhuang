@@ -62,10 +62,6 @@ func (s *TokenStore) IsAuthRequired() bool {
 	return s.authRequired
 }
 
-func (s *TokenStore) HasTokens() bool {
-	return len(s.tokens) > 0
-}
-
 func (s *TokenStore) ValidateToken(rawToken string) (string, bool) {
 	token := strings.TrimSpace(rawToken)
 	if len(token) < 32 || len(token) > 512 {

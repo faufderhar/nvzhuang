@@ -79,47 +79,40 @@ func LoadSecurityConfig(ctx context.Context) (*SecurityConfig, error) {
 		return nil, err
 	}
 
+	// 显式写成空值 / 非正数的字段回退到默认值
+	def := DefaultSecurityConfig()
 	if cfg.APIKeysEnv == "" {
-		cfg.APIKeysEnv = "TRYON_API_KEYS"
+		cfg.APIKeysEnv = def.APIKeysEnv
 	}
 	if len(cfg.TrustedOrigins) == 0 {
-		cfg.TrustedOrigins = []string{
-			"https://paipiange.github.io",
-			"http://localhost:3000",
-			"http://127.0.0.1:3000",
-		}
+		cfg.TrustedOrigins = def.TrustedOrigins
 	}
 	if len(cfg.ClientModelAllowedPorts) == 0 {
-		cfg.ClientModelAllowedPorts = []int{443}
+		cfg.ClientModelAllowedPorts = def.ClientModelAllowedPorts
 	}
 	for _, p := range cfg.ClientModelAllowedPorts {
 		if p < 1 || p > 65535 {
 			return nil, fmt.Errorf("security.clientModelAllowedPorts 端口无效: %d", p)
 		}
 	}
-	if cfg.RateLimit.RequestsPerMinute <= 0 {
-		cfg.RateLimit.RequestsPerMinute = 10
-	}
-	if cfg.RateLimit.Burst <= 0 {
-		cfg.RateLimit.Burst = 3
-	}
-	if cfg.RateLimit.LimiterIdleMinutes <= 0 {
-		cfg.RateLimit.LimiterIdleMinutes = 30
-	}
-	if cfg.RateLimit.DailyRequestsPerPrincipal <= 0 {
-		cfg.RateLimit.DailyRequestsPerPrincipal = 100
-	}
-	if cfg.Concurrency.Global <= 0 {
-		cfg.Concurrency.Global = 2
-	}
-	if cfg.Concurrency.PerPrincipal <= 0 {
-		cfg.Concurrency.PerPrincipal = 1
-	}
+	positiveOr(&cfg.RateLimit.RequestsPerMinute, def.RateLimit.RequestsPerMinute)
+	positiveOr(&cfg.RateLimit.Burst, def.RateLimit.Burst)
+	positiveOr(&cfg.RateLimit.LimiterIdleMinutes, def.RateLimit.LimiterIdleMinutes)
+	positiveOr(&cfg.RateLimit.DailyRequestsPerPrincipal, def.RateLimit.DailyRequestsPerPrincipal)
+	positiveOr(&cfg.Concurrency.Global, def.Concurrency.Global)
+	positiveOr(&cfg.Concurrency.PerPrincipal, def.Concurrency.PerPrincipal)
 	if cfg.Concurrency.QueueTimeoutSeconds < 0 || cfg.Concurrency.QueueTimeoutSeconds > MaxQueueTimeoutSeconds {
 		return nil, fmt.Errorf("security.concurrency.queueTimeoutSeconds 必须在 0–%d 之间: %d", MaxQueueTimeoutSeconds, cfg.Concurrency.QueueTimeoutSeconds)
 	}
 
 	return cfg, nil
+}
+
+// positiveOr 在 *v <= 0 时写入默认值 def。
+func positiveOr(v *int, def int) {
+	if *v <= 0 {
+		*v = def
+	}
 }
 
 // ParseTrustedProxies 解析可信代理列表（支持单个 IP 或 CIDR），格式错误时返回错误以便启动失败。
