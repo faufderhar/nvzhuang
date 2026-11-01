@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -108,5 +109,45 @@ func TestProdOverridesConsistency(t *testing.T) {
 	sc := LoadShutdownConfig(ctx)
 	if time.Duration(grace)*time.Second < sc.DrainDelay+sc.Timeout {
 		t.Fatalf("stop_grace_period %ds 必须 ≥ drainDelay + timeout (%s)", grace, sc.DrainDelay+sc.Timeout)
+	}
+}
+
+// 安全审计回归（F1 / F3 / F7）：Nginx 按路径限制请求体、/tryon 路径变体共用严格限流、
+// 兜底 server 拒绝未知 Host、compose 只在 IPv4 上发布端口且请求体临时文件落盘。
+func TestNginxComposeSecurityHardening(t *testing.T) {
+	compose := readRepoFile(t, "deploy/docker-compose.prod.yml")
+	tmpl := readRepoFile(t, "deploy/nginx/templates/nvzhuang.conf.template")
+
+	for _, must := range []string{
+		"location ~ ^/tryon/*$ {",
+		"listen 80 default_server;",
+		"listen 443 ssl default_server;",
+		"return 444;",
+		"client_max_body_size 64k;",
+		"client_max_body_size 30m;",
+		"client_header_timeout 15s;",
+		"allow 172.30.0.1;",
+	} {
+		if !strings.Contains(tmpl, must) {
+			t.Fatalf("Nginx 模板缺少 %q", must)
+		}
+	}
+	for _, mustNot := range []string{"location = /tryon", "allow 172.30.0.0/24;"} {
+		if strings.Contains(tmpl, mustNot) {
+			t.Fatalf("Nginx 模板不应包含 %q", mustNot)
+		}
+	}
+	// 30m 只能出现在 /tryon location，server 级不能再有全局大上限
+	if n := strings.Count(tmpl, "client_max_body_size 30m;"); n != 1 {
+		t.Fatalf("30m 请求体上限只能出现在 /tryon location 中，实际出现 %d 次", n)
+	}
+
+	for _, must := range []string{`"0.0.0.0:80:80"`, `"0.0.0.0:443:443"`, "nginx-body-temp:/var/cache/nginx/client_temp"} {
+		if !strings.Contains(compose, must) {
+			t.Fatalf("生产 compose 缺少 %q", must)
+		}
+	}
+	if regexp.MustCompile(`(?m)^\s+- "(80|443):(80|443)"$`).MatchString(compose) {
+		t.Fatal("生产 compose 不应同时在 IPv6 上发布 80/443（请使用 0.0.0.0: 前缀）")
 	}
 }

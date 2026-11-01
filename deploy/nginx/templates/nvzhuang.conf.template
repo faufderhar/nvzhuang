@@ -17,6 +17,35 @@ upstream nvzhuang_backend {
     keepalive 16;
 }
 
+# ---- 兜底虚拟主机：Host / SNI 不是 API 域名的请求（按 IP 扫描、伪造 Host）一律断开 ----
+# 80：直接关闭连接（444）。ACME 校验使用域名 Host，命中下面的正式 server。
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 444;
+}
+
+# 443：复用同一张证书（证书已在 CT 日志公开，不额外泄露信息），除容器自检 /healthz 外一律断开。
+# 不用 ssl_reject_handshake：容器 healthcheck 以 https://127.0.0.1/healthz 访问（无 SNI），需要能完成握手。
+server {
+    listen 443 ssl default_server;
+    listen [::]:443 ssl default_server;
+    server_name _;
+    ssl_certificate     ${TLS_CERT_PATH};
+    ssl_certificate_key ${TLS_KEY_PATH};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    server_tokens off;
+    client_max_body_size 1k;
+    location = /healthz {
+        allow 127.0.0.1;
+        allow ::1;
+        deny all;
+        proxy_pass http://nvzhuang_backend;
+    }
+    location / { return 444; }
+}
+
 server {
     listen 80;
     listen [::]:80;
@@ -51,10 +80,14 @@ server {
     add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
     add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
 
-    # 请求体：后端上限约 20 MB，这里留余量；开启请求缓冲，慢速上传不会占用后端连接
-    client_max_body_size 30m;
+    # 请求体：只有 /tryon 需要大请求体（见下方 location，后端上限约 20 MB，留余量 30m）；
+    # 其它路径只接受很小的请求体，避免任意路径都能让网关缓冲 30 MB。
+    # 开启请求缓冲，慢速上传不会占用后端连接；超过 client_body_buffer_size 的部分写入
+    # /var/cache/nginx/client_temp（compose 中挂载为磁盘卷，不占容器内存）。
+    client_max_body_size 64k;
     client_body_buffer_size 1m;
     client_body_timeout 60s;
+    client_header_timeout 15s;
     proxy_request_buffering on;
 
     # 网关自身产生的错误统一返回 JSON（后端返回的 JSON 错误原样透传，不被替换）
@@ -94,18 +127,25 @@ server {
     proxy_send_timeout 300s;
     proxy_buffering on;
 
-    # 生图接口：更严格的限流与单 IP 并发
-    location = /tryon {
+    # 生图接口：更严格的限流与单 IP 并发。
+    # 用正则同时覆盖 /tryon、/tryon/、/tryon// 等写法（后端同样会路由到处理器）；
+    # $uri 已完成解码、merge_slashes 与 ./.. 归一化，因此 //tryon、/./tryon、/tryon%2F 也会命中这里。
+    location ~ ^/tryon/*$ {
+        client_max_body_size 30m;
         limit_req  zone=tryon_req burst=5 nodelay;
         limit_conn per_ip_conn 2;
         proxy_pass http://nvzhuang_backend;
     }
 
-    # 探针只给本机/内网监控使用，不对公网开放（容器健康检查直接访问后端）
+    # 探针只给本机使用，不对公网开放：
+    #   127.0.0.1 / ::1  容器内自检（docker exec / healthcheck）
+    #   172.30.0.1       宿主机本机经 Docker 端口转发访问（verify.sh --local）时看到的网关地址。
+    # 前提：compose 只发布 IPv4 端口（见 docker-compose.prod.yml）。若改为同时发布 IPv6，
+    # 公网 IPv6 客户端也会经 docker-proxy 显示为 172.30.0.1，必须同时删除下面这一行。
     location ~ ^/(healthz|readyz)$ {
         allow 127.0.0.1;
         allow ::1;
-        allow 172.30.0.0/24;
+        allow 172.30.0.1;
         deny all;
         proxy_pass http://nvzhuang_backend;
     }

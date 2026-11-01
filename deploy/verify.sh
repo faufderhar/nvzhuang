@@ -257,6 +257,8 @@ if [ "$LOCAL" = 1 ]; then
   check "后端未发布任何端口" "$(docker port "$BK" 2>/dev/null | wc -l | tr -d ' ')" "0"
   ports="$(docker port "$NG" 2>/dev/null | cut -d' ' -f1 | sort -u | tr '\n' ' ')"
   check "Nginx 只发布 80/443" "$ports" "443/tcp 80/tcp "
+  # IPv6 入站会经 docker-proxy 变成网关地址 172.30.0.1（绕过按 IP 限流、命中探针白名单），生产只发布 IPv4
+  check "Nginx 未在 IPv6 上发布端口" "$(docker port "$NG" 2>/dev/null | grep -c '\[::\]' || true)" "0"
   check "后端重启策略" "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$BK")" "unless-stopped"
   check "Nginx 重启策略" "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$NG")" "unless-stopped"
   check "后端内存上限 3 GiB / 3 CPU" "$(docker inspect -f '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}' "$BK")" "3221225472 3000000000"
