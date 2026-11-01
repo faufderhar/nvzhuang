@@ -46,39 +46,25 @@ func LoadImageLimits(ctx context.Context) ImageLimits {
 	}
 	_ = val.Scan(&limits)
 
-	if limits.MaxRequestBodyBytes <= 0 {
-		limits.MaxRequestBodyBytes = 25165824
-	}
-	if limits.MaxEncodedImageBytes <= 0 {
-		limits.MaxEncodedImageBytes = 12582912
-	}
-	if limits.MaxDecodedImageBytes <= 0 {
-		limits.MaxDecodedImageBytes = 8388608
-	}
-	if limits.MaxCombinedDecodedBytes <= 0 {
-		limits.MaxCombinedDecodedBytes = 16777216
-	}
-	if limits.MinWidth <= 0 {
-		limits.MinWidth = 256
-	}
-	if limits.MinHeight <= 0 {
-		limits.MinHeight = 256
-	}
-	if limits.MaxWidth <= 0 {
-		limits.MaxWidth = 8192
-	}
-	if limits.MaxHeight <= 0 {
-		limits.MaxHeight = 8192
-	}
-	if limits.MaxPixels <= 0 {
-		limits.MaxPixels = 20000000
-	}
+	// 非正数 / 空列表回退到默认值
+	def := DefaultImageLimits()
+	positiveOr(&limits.MaxRequestBodyBytes, def.MaxRequestBodyBytes)
+	positiveOr(&limits.MaxEncodedImageBytes, def.MaxEncodedImageBytes)
+	positiveOr(&limits.MaxDecodedImageBytes, def.MaxDecodedImageBytes)
+	positiveOr(&limits.MaxCombinedDecodedBytes, def.MaxCombinedDecodedBytes)
+	positiveOr(&limits.MinWidth, def.MinWidth)
+	positiveOr(&limits.MinHeight, def.MinHeight)
+	positiveOr(&limits.MaxWidth, def.MaxWidth)
+	positiveOr(&limits.MaxHeight, def.MaxHeight)
+	positiveOr(&limits.MaxPixels, def.MaxPixels)
 	if len(limits.AllowedMimeTypes) == 0 {
-		limits.AllowedMimeTypes = []string{
-			"image/jpeg",
-			"image/png",
-			"image/webp",
-		}
+		limits.AllowedMimeTypes = def.AllowedMimeTypes
 	}
 	return limits
+}
+
+func positiveOr[T int | int64](v *T, def T) {
+	if *v <= 0 {
+		*v = def
+	}
 }

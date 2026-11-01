@@ -3,6 +3,7 @@ package security
 import (
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 var redactPatterns = []struct {
@@ -53,12 +54,10 @@ func RedactSecrets(s string, sensitive ...string) string {
 	const maxLen = 300
 	if len(s) > maxLen {
 		cut := maxLen
-		for cut > 0 && !isRuneStart(s[cut]) {
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
 			cut--
 		}
 		s = s[:cut] + "..."
 	}
 	return s
 }
-
-func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }

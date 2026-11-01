@@ -1,9 +1,7 @@
 package tryon
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -51,20 +49,6 @@ type doubaoRequest struct {
 	Watermark      bool     `json:"watermark,omitempty"`
 }
 
-// doubaoResponse 豆包图片生成响应
-type doubaoResponse struct {
-	Data  []doubaoData `json:"data"`
-	Error *struct {
-		Message string `json:"message"`
-		Code    string `json:"code"`
-	} `json:"error,omitempty"`
-}
-
-type doubaoData struct {
-	URL     string `json:"url"`
-	B64JSON string `json:"b64_json"`
-}
-
 func (d *Doubao) Generate(ctx context.Context, personB64, garmentB64, prompt, size string) (string, error) {
 	if d.apiKey == "" {
 		return "", fmt.Errorf("豆包 API Key 未配置（llm.models.%s.apiKey 或环境变量 ARK_API_KEY）", d.name)
@@ -82,56 +66,7 @@ func (d *Doubao) Generate(ctx context.Context, personB64, garmentB64, prompt, si
 		ResponseFormat: "url",
 	}
 
-	body, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", err
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", d.baseURL+"/images/generations", bytes.NewReader(body))
-	if err != nil {
-		return "", fmt.Errorf("模型服务请求创建失败")
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+d.apiKey)
-
-	resp, err := d.client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("无法连接模型服务")
-	}
-	defer resp.Body.Close()
-
-	respBody, err := readModelResponse(resp)
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("豆包 API 错误 (status %d): %s", resp.StatusCode, truncate(string(respBody), 300))
-	}
-
-	var result doubaoResponse
-	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", err
-	}
-	if result.Error != nil {
-		return "", fmt.Errorf("豆包 API 错误: %s", result.Error.Message)
-	}
-	if len(result.Data) == 0 {
-		return "", fmt.Errorf("豆包 API 未返回图片")
-	}
-
-	// 优先 b64，其次下载 url
-	if result.Data[0].B64JSON != "" {
-		return result.Data[0].B64JSON, nil
-	}
-	if result.Data[0].URL != "" {
-		return d.downloadImage(ctx, result.Data[0].URL)
-	}
-	return "", fmt.Errorf("豆包 API 返回格式无法解析")
-}
-
-// downloadImage 下载 URL 图片并转 base64
-func (d *Doubao) downloadImage(ctx context.Context, url string) (string, error) {
-	return downloadResultImage(ctx, url, d.resultOrigin)
+	return postImageGeneration(ctx, d.client, d.baseURL, d.apiKey, reqBody, "豆包 API", d.resultOrigin)
 }
 
 // normalizeDoubaoSize 把 OpenAI 风格的尺寸转成豆包支持的像素格式

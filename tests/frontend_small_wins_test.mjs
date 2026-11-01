@@ -211,4 +211,36 @@ for (const key of ['retryAfterSuffix', 'retryCountdown', 'retryReady', 'aiGatewa
   assert.equal(f('https://user:pass@tryon.example.com'), '', '禁止 URL 内嵌凭据');
 }
 
+// ---------- 代码审查回归：存储不可用时不崩溃、函数不重复定义、头像 blob URL 释放 ----------
+{
+  const throwingStorage = { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); } };
+  const ctx = run([
+    "const COMPRESS_STORAGE_KEY = 'nvzhuang_compress_image';",
+    fn('readCompressPref'), fn('saveCompressPref'),
+    'globalThis.api = { readCompressPref, saveCompressPref };',
+  ].join('\n'), { localStorage: throwingStorage });
+  assert.equal(ctx.api.readCompressPref(), null, '存储被禁用时应返回 null 而非抛错');
+  assert.doesNotThrow(() => ctx.api.saveCompressPref(true));
+  const raw = html.match(/localStorage\.(get|set)Item\(COMPRESS_STORAGE_KEY/g) || [];
+  assert.equal(raw.length, 2, '压缩偏好只能经 readCompressPref/saveCompressPref 读写');
+
+  for (const name of ['loadImageElement', 'showGarmentFileError', 'prepareTryonImage']) {
+    const count = html.split(`function ${name}(`).length - 1;
+    assert.equal(count, 1, `${name} 不应重复定义`);
+  }
+  assert.ok(!html.includes('function urlToB64('), 'urlToB64 已无调用方');
+
+  const revoked = [];
+  const ctx2 = run([
+    'let personSrc = null;',
+    fn('setPersonSrc'),
+    'globalThis.api = { setPersonSrc, get: () => personSrc };',
+  ].join('\n'), { URL: { revokeObjectURL: u => revoked.push(u) } });
+  ctx2.api.setPersonSrc('blob:a');
+  ctx2.api.setPersonSrc('blob:b');
+  ctx2.api.setPersonSrc(null);
+  assert.deepEqual(revoked, ['blob:a', 'blob:b'], '替换或移除头像时应释放旧的 blob URL');
+  assert.equal(ctx2.api.get(), null);
+}
+
 console.log('frontend small-wins tests passed');

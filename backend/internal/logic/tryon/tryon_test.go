@@ -2,7 +2,7 @@ package tryon
 
 import (
 	"context"
-	"net"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -10,14 +10,14 @@ import (
 )
 
 func TestBuildPrompt(t *testing.T) {
-	gptZh := BuildGPT("zh")
+	gptZh := BuildGPTSafety("zh")
 	if !strings.Contains(gptZh, "虚拟试衣") {
-		t.Errorf("BuildGPT(zh) should contain 虚拟试衣, got: %s", gptZh)
+		t.Errorf("BuildGPTSafety(zh) should contain 虚拟试衣, got: %s", gptZh)
 	}
 
-	gptEn := BuildGPT("en")
+	gptEn := BuildGPTSafety("en")
 	if !strings.Contains(gptEn, "virtual try-on") {
-		t.Errorf("BuildGPT(en) should contain virtual try-on, got: %s", gptEn)
+		t.Errorf("BuildGPTSafety(en) should contain virtual try-on, got: %s", gptEn)
 	}
 
 	// Gemini 保留原英文稳定提示词
@@ -58,29 +58,22 @@ func TestBuildPrompt(t *testing.T) {
 
 func TestForbiddenClientIP(t *testing.T) {
 	for _, raw := range []string{"127.0.0.1", "10.0.0.1", "192.168.1.1", "169.254.169.254", "::1"} {
-		if !isForbiddenClientIP(net.ParseIP(raw)) {
+		if !isForbiddenAddr(netip.MustParseAddr(raw)) {
 			t.Fatalf("expected %s to be forbidden", raw)
 		}
 	}
-	if isForbiddenClientIP(net.ParseIP("8.8.8.8")) {
+	if isForbiddenAddr(netip.MustParseAddr("8.8.8.8")) {
 		t.Fatal("expected public IP to be allowed")
 	}
 }
 
-func TestDecodeB64(t *testing.T) {
-	validB64 := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
-	if err := decodeB64(validB64); err != nil {
-		t.Errorf("decodeB64 should succeed for valid base64: %v", err)
+func TestEnsureBase64(t *testing.T) {
+	raw := "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+	if got := ensureBase64(raw); got != raw {
+		t.Errorf("plain base64 should be unchanged, got %q", got)
 	}
-
-	dataUri := "data:image/png;base64," + validB64
-	if err := decodeB64(dataUri); err != nil {
-		t.Errorf("decodeB64 should succeed for data uri: %v", err)
-	}
-
-	invalidB64 := "!!!not-valid-base64!!!"
-	if err := decodeB64(invalidB64); err == nil {
-		t.Errorf("decodeB64 should fail for invalid base64")
+	if got := ensureBase64("data:image/png;base64," + raw); got != raw {
+		t.Errorf("data URL prefix should be stripped, got %q", got)
 	}
 }
 

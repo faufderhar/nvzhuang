@@ -28,15 +28,6 @@ func NewBodyLimitMiddleware(maxBytes int64) *BodyLimitMiddleware {
 // MaxBytes 返回业务请求体上限。
 func (m *BodyLimitMiddleware) MaxBytes() int64 { return m.maxBytes }
 
-// Handler 按规范化路径判断是否需要限制请求体，可挂在全局路由组上。
-func (m *BodyLimitMiddleware) Handler(r *ghttp.Request) {
-	if !IsTryonPath(r.URL.Path) {
-		r.Middleware.Next()
-		return
-	}
-	m.Enforce(r)
-}
-
 // Enforce 无条件限制 POST 请求体大小，用于直接挂在受保护的路由组上。
 func (m *BodyLimitMiddleware) Enforce(r *ghttp.Request) {
 	if r.Method != http.MethodPost {

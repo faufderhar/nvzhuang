@@ -17,15 +17,6 @@ func NewRateLimitMiddleware(limiter *security.RateLimiter) *RateLimitMiddleware 
 	return &RateLimitMiddleware{limiter: limiter}
 }
 
-// Handler 按规范化路径判断是否需要限流，可挂在全局路由组上。
-func (m *RateLimitMiddleware) Handler(r *ghttp.Request) {
-	if r.Method == http.MethodOptions || !IsProtectedPath(r.URL.Path) {
-		r.Middleware.Next()
-		return
-	}
-	m.Enforce(r)
-}
-
 // Enforce 无条件执行限流，用于直接挂在受保护的路由组上。
 func (m *RateLimitMiddleware) Enforce(r *ghttp.Request) {
 	if r.Method == http.MethodOptions {
