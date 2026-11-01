@@ -1779,12 +1779,16 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     settingsMessage.textContent = '';
     settingsMessage.className = 'settings-message';
   }
+  // 当前选择（内置模型或个人配置）是否为 GPT-Image 系列
+  function isGptImageSelected(){
+    return tryonSettings.useCustom
+      ? /gpt-image/i.test(tryonSettings.model || '')
+      : document.getElementById('aiModel').value === 'gpt-image';
+  }
   function refreshConfigUI(){
     const aiModelEl = document.getElementById('aiModel');
     const aiGptNotice = document.getElementById('aiGptNotice');
-    const isGPT = tryonSettings.useCustom
-      ? /gpt-image/i.test(tryonSettings.model || '')
-      : aiModelEl.value === 'gpt-image';
+    const isGPT = isGptImageSelected();
     if(aiGptNotice){
       aiGptNotice.style.display = isGPT ? 'block' : 'none';
     }
@@ -1911,13 +1915,9 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
   serviceDialog.addEventListener('pointerdown', e=>{ if(e.target===serviceDialog) closeServiceDialog(); });
   taobaoGuideClose.addEventListener('click', closeTaobaoGuide);
   taobaoGuideOpen.addEventListener('click', ()=>{
-    if(shoppingGuidePlatform === 'pinduoduo'){
-      if(taobaoGuideIsMobile) window.location.href = 'pinduoduo://com.xunmeng.pinduoduo';
-      else window.open('https://www.yangkeduo.com/', '_blank', 'noopener,noreferrer');
-      return;
-    }
-    if(taobaoGuideIsMobile) window.location.href = 'taobao://';
-    else window.open('https://s.taobao.com', '_blank', 'noopener,noreferrer');
+    const target = SHOPPING_SEARCH[shoppingGuidePlatform === 'pinduoduo' ? 'pinduoduo' : 'taobao'];
+    if(taobaoGuideIsMobile) window.location.href = target.mobileUrl;
+    else window.open(target.desktopUrl, '_blank', 'noopener,noreferrer');
   });
   taobaoGuide.addEventListener('pointerdown', e=>{ if(e.target===taobaoGuide) closeTaobaoGuide(); });
   document.getElementById('aiSettingsClose').addEventListener('click', closeSettings);
@@ -2031,15 +2031,6 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     uploadedGarments.forEach(releaseGarmentItem);
     uploadedGarments = [];
     revokeUploadedGarmentComposite();
-  }
-
-  function loadImageElement(source){
-    return new Promise((resolve, reject)=>{
-      const img = new Image();
-      img.onload = ()=>resolve(img);
-      img.onerror = ()=>reject(new Error('INVALID_IMAGE'));
-      img.src = source;
-    });
   }
 
   function validateGarmentFile(file){
@@ -2241,14 +2232,24 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
   const photoPreview = document.getElementById('fitPhotoPreview');
   const fitCompressEl = document.getElementById('fitCompress');
   const COMPRESS_STORAGE_KEY = 'nvzhuang_compress_image';
+  // 浏览器禁用存储（隐私模式、沙箱 iframe）时 localStorage 访问会抛错，不能因此中断整个试衣模块。
+  function readCompressPref(){
+    try{ return localStorage.getItem(COMPRESS_STORAGE_KEY); }catch(_){ return null; }
+  }
+  function saveCompressPref(on){
+    try{ localStorage.setItem(COMPRESS_STORAGE_KEY, on ? '1' : '0'); }catch(_){}
+  }
   if(fitCompressEl){
-    const savedCompress = localStorage.getItem(COMPRESS_STORAGE_KEY);
+    const savedCompress = readCompressPref();
     if(savedCompress !== null){
       fitCompressEl.checked = savedCompress === '1';
     }
-    fitCompressEl.addEventListener('change', ()=>{
-      localStorage.setItem(COMPRESS_STORAGE_KEY, fitCompressEl.checked ? '1' : '0');
-    });
+    fitCompressEl.addEventListener('change', ()=>saveCompressPref(fitCompressEl.checked));
+  }
+  // 替换或移除头像时释放旧的 blob URL，避免反复上传造成内存泄漏。
+  function setPersonSrc(url){
+    if(personSrc && personSrc !== url) URL.revokeObjectURL(personSrc);
+    personSrc = url;
   }
 
   document.getElementById('fitFile').addEventListener('change', e=>{
@@ -2265,7 +2266,7 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     const url = URL.createObjectURL(f);
     const img = new Image();
     img.onload = () => {
-      personSrc = url;
+      setPersonSrc(url);
       photoPreview.src = url;
       photoWrap.hidden = false;
       e.target.value='';
@@ -2278,7 +2279,7 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     img.src = url;
   });
   document.getElementById('fitPhotoRm').addEventListener('click', ()=>{
-    personSrc = null;
+    setPersonSrc(null);
     photoWrap.hidden = true;
     photoPreview.src = '';
   });
@@ -2335,18 +2336,14 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     garmentUploadIntent = 'replace';
     fitGarmentFile.click();
   });
-  customGarmentItems.addEventListener('click', async e=>{
+  customGarmentItems.addEventListener('click', e=>{
     const button = e.target.closest('.custom-garment-item-remove');
     if(!button) return;
     const index = Number(button.dataset.index);
     if(!Number.isInteger(index) || !uploadedGarments[index]) return;
     releaseGarmentItem(uploadedGarments[index]);
     uploadedGarments.splice(index, 1);
-    revokeUploadedGarmentComposite();
-    if(uploadedGarments.length === 2){
-      try{ uploadedGarmentCompositeUrl = await buildGarmentCompositeUrl(uploadedGarments); }
-      catch(err){ showGarmentFileError(err && err.message); }
-    }
+    revokeUploadedGarmentComposite(); // 删除后最多剩 1 件，不再需要上下装拼图
     refreshCustomGarmentPreview();
     refreshPicked();
     showHint(uploadedGarments.length ? t('customGarmentOneReady') : t('aiNeedUploadedGarment'));
@@ -2676,12 +2673,6 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     return { code: '', text: t('aiFailed') };
   }
 
-  // 兼容老调用（如有）
-  function urlToB64(src){
-    const shouldCompress = fitCompressEl ? fitCompressEl.checked : true;
-    return prepareTryonImage(src, shouldCompress);
-  }
-
   function blobToPng(blob){
     if(blob.type==='image/png') return Promise.resolve(blob);
     return new Promise((resolve, reject)=>{
@@ -2811,9 +2802,7 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     const aiApi = getAIAPI();
     if(!aiApi){ showTryonError(t('aiServerErr'), {settings:true}); return; }
 
-    const isGPT = tryonSettings.useCustom
-      ? /gpt-image/i.test(tryonSettings.model || '')
-      : aiModel.value === 'gpt-image';
+    const isGPT = isGptImageSelected();
     const isComfy = tryonSettings.useCustom && tryonSettings.provider === 'comfyui';
 
     setGenerating(true, isGPT, isComfy);
@@ -2829,13 +2818,7 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
         personB64 = await prepareTryonImage(personSrc, shouldCompress);
         garmentB64 = await prepareTryonImage(selectedGarment.imageSource, shouldCompress);
       }catch(imgErr){
-        setGenerating(false);
-        const code = imgErr && imgErr.message;
-        if(code === 'IMAGE_DIMENSIONS_INVALID') showTryonError(t('errImageDimensionsInvalid'));
-        else if(code === 'IMAGE_PIXEL_LIMIT_EXCEEDED') showTryonError(t('errImagePixelLimitExceeded'));
-        else if(code === 'IMAGE_FILE_TOO_LARGE') showTryonError(t('errImageFileTooLarge'));
-        else if(code === 'UNSUPPORTED_IMAGE_TYPE') showTryonError(t('errUnsupportedImageType'));
-        else showTryonError(t('errInvalidImageBase64'));
+        showGarmentFileError(imgErr && imgErr.message);
         return;
       }
 
@@ -2901,7 +2884,7 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
         if(errInfo.retryAfter) startRetryCountdown(errInfo.retryAfter);
         if(errInfo.code === 'REQUEST_TOO_LARGE' && fitCompressEl && !fitCompressEl.checked){
           fitCompressEl.checked = true;
-          localStorage.setItem(COMPRESS_STORAGE_KEY, '1');
+          saveCompressPref(true);
         }
         return;
       }
