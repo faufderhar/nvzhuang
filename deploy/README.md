@@ -34,8 +34,11 @@ deploy/
 
 3. **IPv6 与未知 Host**：compose 只以 `0.0.0.0:80`、`0.0.0.0:443` 发布端口。Docker 默认网络没有 IPv6 地址，IPv6 入站会经 docker-proxy 转成网关 `172.30.0.1`，所有 IPv6 用户将共用一个限流桶、并命中探针白名单；因此不发布 IPv6，探针白名单也只保留 `127.0.0.1`、`::1` 与宿主机本机访问时的 `172.30.0.1`。80/443 另有 `default_server` 兜底：Host 或 SNI 不是 API 域名（按 IP 扫描、伪造 Host）时直接断开（444），443 兜底只放行容器自检 `https://127.0.0.1/healthz`。
 4. **请求体**：全局 `client_max_body_size 64k`，只有 `location ~ ^/tryon/*$`（覆盖 `/tryon/`、`//tryon`、`/tryon%2F` 等写法，共用严格限流）放宽到 30m；超过内存缓冲的部分写入磁盘卷 `nginx-body-temp`，不计入 Nginx 容器的 256 MiB 内存上限。
+5. **无 Token 预检**：`/tryon` 未带 `Authorization: Bearer <非空>` 时，Nginx 在 rewrite 阶段直接返回与后端一致的 `401 {"code":40101,...,"error_code":"AUTH_REQUIRED"}`，不读取、不缓冲请求体（超过 30m 的 Content-Length 仍先返回 413）；OPTIONS 预检照常转发给后端。Nginx 只检查格式，Token 真伪仍由后端校验。该 401 与 JSON 错误页只对 `.env.prod` 中的 `FRONTEND_ORIGIN` 带 `Access-Control-Allow-Origin`（精确匹配），因此 `FRONTEND_ORIGIN` 必须与 `config.yaml` 的 `security.trustedOrigins` 一致，否则前端会显示网络错误而不是“请填写 Token”。无 Token 请求在限流之前返回，不消耗 `/tryon` 限流桶。
+6. **HSTS 含 `includeSubDomains`**：`Strict-Transport-Security: max-age=31536000; includeSubDomains`。浏览器会在一年内对 **API 域名的所有子域名**强制 HTTPS——如果 `API_SERVER_NAME` 下还有只提供 HTTP 的子域名（如 `x.api.example.com`），启用前先为它们配好 HTTPS，或改用独立的 API 域名。HSTS 只对 API 域名本身下发，不影响父域名或前端域名。
+7. **镜像按摘要固定**：`nginx:1.28-alpine`、`golang:1.26-alpine`、`alpine:3.22` 均写成 `tag@sha256:<多架构 index 摘要>`，同一 tag 被重新发布也不会改变构建结果。定期运行 `scripts/image-digests.sh`（只读，访问 Docker Hub）检查是否有新构建；出现 `CHANGED` 时把新摘要写回文件、重新构建并验收后提交。`TestDockerImagesPinnedByDigest` 保证不会退回裸 tag。
 
-`backend/internal/cmd/deploy_consistency_test.go`（`TestProdOverridesConsistency`、`TestNginxComposeSecurityHardening`）会交叉校验 compose、Nginx 模板与覆盖配置，任何一处改动不一致都会让 `scripts/check.sh` 失败。
+`backend/internal/cmd/deploy_consistency_test.go`（`TestProdOverridesConsistency`、`TestNginxComposeSecurityHardening`、`TestNginxPreAuthAndHSTS`、`TestDockerImagesPinnedByDigest`）会交叉校验 compose、Nginx 模板与覆盖配置，任何一处改动不一致都会让 `scripts/check.sh` 失败。
 
 ## 使用步骤（在仓库根目录）
 

@@ -43,7 +43,7 @@ Nginx 容器 costume-tryon-nginx 172.30.0.2（唯一发布 80/443 的服务）
 |---|---|---|---|
 | `SERVER_PUBLIC_IP` | 必填 | VPS 公网 IPv4 | `203.0.113.10` |
 | `API_DOMAIN` | 必填 | 对外 API 域名，A 记录指向 `SERVER_PUBLIC_IP`，**不要配 AAAA**（见 §2.4） | `api.example.com` |
-| `FRONTEND_ORIGIN` | 必填 | 前端来源（协议+主机，无路径、无结尾斜杠），写入 CORS 白名单 | `https://frontend.example.com`（GitHub Pages 为 `https://<用户名>.github.io`） |
+| `FRONTEND_ORIGIN` | 必填 | 前端来源（协议+主机，无路径、无结尾斜杠），写入后端 CORS 白名单，同时写入 `deploy/.env.prod` 供 Nginx 在无 Token 的 401 / 错误页上带 CORS 头 | `https://frontend.example.com`（GitHub Pages 为 `https://<用户名>.github.io`） |
 | `FRONTEND_URL` | 可选 | 前端页面地址，验收时检查可访问；默认 `${FRONTEND_ORIGIN}/` | `https://<用户名>.github.io/nvzhuang/` |
 | `ADMIN_USER` | 必填 | 新建的非 root 管理用户名（`^[a-z_][a-z0-9_-]{0,31}$`） | `deploy` |
 | `ADMIN_SSH_PUBKEY` | 必填 | 该用户登录用的 SSH **公钥**（一行，`ssh-ed25519 ...`） | `ssh-ed25519 AAAA... ops` |
@@ -227,7 +227,7 @@ systemctl is-enabled docker
 
 ### 3.6 Nginx
 
-**不在宿主机安装 Nginx。** 仓库的 Nginx 以容器 `costume-tryon-nginx`（镜像 `nginx:1.28-alpine`）运行，由 compose 管理，配置来自 `deploy/nginx/templates/nvzhuang.conf.template`。§2.3 已确认 80/443 空闲。
+**不在宿主机安装 Nginx。** 仓库的 Nginx 以容器 `costume-tryon-nginx`（镜像 `nginx:1.28-alpine`，按 `@sha256:` 摘要固定）运行，由 compose 管理，配置来自 `deploy/nginx/templates/nvzhuang.conf.template`。§2.3 已确认 80/443 空闲。
 
 ---
 
@@ -316,6 +316,7 @@ if [ "$CERT_MODE" = letsencrypt ]; then TLS_DIR=/etc/letsencrypt; CERT=/etc/lets
 else TLS_DIR=/etc/nvzhuang/tls; CERT=$TLS_DIR/fullchain.pem; KEY=$TLS_DIR/privkey.pem; fi
 cat > deploy/.env.prod <<EOF2
 API_SERVER_NAME=$API_DOMAIN
+FRONTEND_ORIGIN=$FRONTEND_ORIGIN
 TLS_DIR=$TLS_DIR
 TLS_CERT_PATH=$CERT
 TLS_KEY_PATH=$KEY
@@ -327,7 +328,7 @@ cat deploy/.env.prod
 git check-ignore -q deploy/.env.prod && echo IGNORED
 ```
 
-预期：六行内容已替换为真实域名与路径；`IGNORED`。
+预期：七行内容已替换为真实域名、前端来源与路径；`IGNORED`。
 
 ### 5.5 后端 `config.yaml`
 
@@ -394,6 +395,8 @@ security:
   allowPrivateNetwork: false
   trustedProxies: ["172.30.0.2/32"]
   clientModelAllowedPorts: [443]
+  # 个人模型 Base URL 域名白名单；不写时默认 OpenAI / 火山方舟 / Gemini 官方域名 + 上面 llm.models 中 HTTPS baseURL 的域名
+  # clientModelAllowedHosts: ["api.openai.com", "ark.cn-beijing.volces.com", "generativelanguage.googleapis.com"]
   stateDir: "/app/data"
   rateLimit:
     requestsPerMinute: 10
@@ -440,7 +443,7 @@ dc config --format json | python3 -c 'import json,sys;e=json.load(sys.stdin)["se
 ```
 
 预期：
-- `CONFIG_OK`；镜像为 `nvzhuang-costume-tryon` 与 `nginx:1.28-alpine`。
+- `CONFIG_OK`；镜像为 `nvzhuang-costume-tryon` 与 `nginx:1.28-alpine@sha256:…`（摘要与 `deploy/docker-compose.prod.yml` 一致）。
 - `published` 只出现 `"80"` 和 `"443"`（都属于 nginx 服务），`ipv4_address` 为 `172.30.0.10` 与 `172.30.0.2`，有 `GOMEMLIMIT: 2GiB`。
 - 最后一行中启用模型对应的 Key 为 `set`（未启用的为 `empty` 正常）。若为 `empty`：检查 §5.3（Key 不在根 `.env`，或没用 `dc`）。
 
@@ -559,7 +562,7 @@ sudo docker logs costume-tryon-backend 2>&1 | tail -n 20
 ```
 
 预期：
-- 构建成功（后端镜像 `nvzhuang-costume-tryon`，基于 `golang:1.26-alpine` 构建、`alpine:3.22` 运行）；
+- 构建成功（后端镜像 `nvzhuang-costume-tryon`，基于 `golang:1.26-alpine` 构建、`alpine:3.22` 运行，两者均按 `@sha256:` 摘要固定）；
 - 3 分钟内打印 `healthy healthy`；
 - `dc ps` 中 `costume-tryon-backend` 的 PORTS 为空，`costume-tryon-nginx` 为 `0.0.0.0:80->80/tcp, 0.0.0.0:443->443/tcp`（显示格式可能略有不同，但只能有 80/443，且**不能**出现 `[::]`）；
 - 后端日志没有 `【部署告警】`、没有 `环境变量 TRYON_API_KEYS 中包含示例/占位 Token`、没有 `permission denied`。
@@ -634,9 +637,9 @@ echo "exit=${PIPESTATUS[0]}"
 | 验收项 | 脚本检查（必须为 PASS） | 实际判据 |
 |---|---|---|
 | HTTPS 与跳转 | `HTTPS 可访问（证书校验: 开启）`、`HTTP 301 跳转到 HTTPS` | `GET /hello` 返回 200 且证书有效；`http://` 返回 301 到 `https://` |
-| 安全头 | `HSTS`、`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`、`Content-Security-Policy`、`隐藏 Nginx 版本（Server: nginx）` | 值与模板完全一致，如 `max-age=31536000`、`nosniff`、`DENY`、`no-referrer`、`default-src 'none'; frame-ancestors 'none'`；`Server` 不含版本号 |
+| 安全头 | `HSTS`、`X-Content-Type-Options`、`X-Frame-Options`、`Referrer-Policy`、`Permissions-Policy`、`Content-Security-Policy`、`隐藏 Nginx 版本（Server: nginx）` | 值与模板完全一致，如 `max-age=31536000; includeSubDomains`、`nosniff`、`DENY`、`no-referrer`、`default-src 'none'; frame-ancestors 'none'`；`Server` 不含版本号 |
 | healthz/readyz | `本机 /healthz`、`本机 /readyz`、`readyz.config/lifecycle/models/state` | `/healthz` → `200 ok`；`/readyz` → `{"checks":{"config":"ok","lifecycle":"ok","models":"ok","state":"ok"},"status":"ready"}` |
-| 无 Token 401 | `无 Token → 401 AUTH_REQUIRED`、`错误 Token → 401 AUTH_INVALID` | `{"code":40101,...,"error_code":"AUTH_REQUIRED"}` / `40102 AUTH_INVALID` |
+| 无 Token 401 | `无 Token → 401 AUTH_REQUIRED`、`无 Token + 前端来源 → 401 且带 CORS 头`、`错误 Token → 401 AUTH_INVALID` | `{"code":40101,...,"error_code":"AUTH_REQUIRED"}` / `40102 AUTH_INVALID` |
 | 带 Token 行为 | `有效 Token → 400 参数校验（鉴权通过）`、`错误响应带 request_id` | 空请求体 → HTTP 400，`"code":51`，`"message":"The person_image field is required"` |
 | CORS | `CORS 预检：前端来源放行`、`CORS 预检：未授权来源 → 403 ORIGIN_NOT_ALLOWED` | `Access-Control-Allow-Origin` 等于 `FRONTEND_ORIGIN`；其它来源 `40301` |
 | SSRF | `SSRF 拒绝 https://127.0.0.1`、`SSRF 拒绝 https://169.254.169.254` | HTTP 400，`"code":53`，`Base URL 不允许指向内网或保留地址` |
@@ -773,6 +776,7 @@ sudo env API_DOMAIN="$API_DOMAIN" FRONTEND_ORIGIN="$FRONTEND_ORIGIN" FRONTEND_UR
 ```
 
 - `git diff --stat` 若显示 `config.example.yaml` 或 `deploy/` 有变化：先阅读变更，把新增的配置键同步进服务器上的 `config.yaml`（§5.5）/`.env.prod`，再 `dc up -d`。
+- 从 2026-11-01 安全修复之前的版本升级：`deploy/.env.prod` 必须先追加一行 `FRONTEND_ORIGIN=$FRONTEND_ORIGIN`（否则 `dc config` 报“请在 .env.prod 中设置 FRONTEND_ORIGIN”）；若用户使用了非官方的个人模型中转站，把其域名加入 `config.yaml` 的 `security.clientModelAllowedHosts`；HSTS 新增 `includeSubDomains`，确认 API 域名下没有只支持 HTTP 的子域名。
 - `dc up -d` 重建后端时，在途请求最多等待 190 秒完成（优雅停机）；建议在低峰执行。
 - 末行不是 `fail=0`：立即回滚（§11.5）。
 
@@ -815,6 +819,8 @@ sudo env API_DOMAIN="$API_DOMAIN" FRONTEND_ORIGIN="$FRONTEND_ORIGIN" FRONTEND_UR
 | 浏览器报 CORS / `403 ORIGIN_NOT_ALLOWED`（40301） | 前端来源与 `trustedOrigins` 不完全一致（多了路径或斜杠、http/https 不同） | 修正 §5.5 的 `FRONTEND_ORIGIN`，`dc up -d --force-recreate costume-tryon` |
 | 前端提示混合内容 / 地址无效 | 后端地址不是 `https://` | 设置中心或 `config.js` 只能填 `https://<API_DOMAIN>` |
 | `401 40101 AUTH_REQUIRED` / `40102 AUTH_INVALID` | 未带 Token / Token 不在 `TRYON_API_KEYS` 中 | 确认用户填写的 Token 来自 `/etc/nvzhuang/tokens.tsv`；改 `.env` 后需 `dc up -d` |
+| 前端提示“网络错误”，但 `verify.sh` 的无 Token 401 正常 | Nginx 的 401 没有对前端来源带 CORS 头：`deploy/.env.prod` 的 `FRONTEND_ORIGIN` 与浏览器地址栏的来源（协议+主机+端口）不一致 | 改正 `FRONTEND_ORIGIN`（同时检查 `security.trustedOrigins`），然后 `dc up -d --force-recreate nginx` |
+| 个人模型报“Base URL 的域名不在服务端允许的模型服务列表中” | 用户填写的中转站域名不在 `security.clientModelAllowedHosts`（默认只含官方域名与服务端模型域名） | 确认可信后把域名（或 `*.域名`）加入 `config.yaml` 的 `security.clientModelAllowedHosts`，`dc restart costume-tryon` |
 | `429 42900`（`Retry-After: 10`） | Nginx 按 IP 限流（`/tryon` 20 次/分、突发 5、单 IP 并发 2） | 正常保护；如需调整改模板后 `dc up -d --force-recreate nginx` |
 | `429 42901` / `42902` / `42903` | 后端令牌桶（10 次/分、突发 3）/ 每日额度（100 次，UTC 0 点重置）/ 并发（全局 6、每人 1，`Retry-After: 5`） | 正常保护；按需调整 `config.yaml` 的 `security.rateLimit` / `concurrency` |
 | 所有用户共用一个限流桶，或公网能访问 `/readyz` | Nginx 被改成同时发布 IPv6（`[::]:80/443`），IPv6 连接被 Docker 用户态代理转成 `172.30.0.1`；或后端被发布了端口 | 恢复 compose 中的 `0.0.0.0:` 端口写法并删除 AAAA（§2.4）；`dc ps` 确认后端无端口 |
@@ -873,10 +879,12 @@ chk "本机验收 fail=0"         'sudo env API_DOMAIN="$API_DOMAIN" FRONTEND_OR
    随后在热备上复查权限：`.env`、`tokens.tsv`、`model-keys.env`、`verify.token` 为 `600 root`，`config.yaml` 为 `640 root 10001`。
 3. **同一个镜像**（不在热备重新构建，避免依赖漂移）：
    ```bash
-   # 主节点
-   sudo docker save nvzhuang-costume-tryon:latest nginx:1.28-alpine | gzip | ssh -p <SSH_PORT> <ADMIN_USER>@<STANDBY_IP> 'gunzip | sudo docker load'
+   # 主节点：只传后端镜像
+   sudo docker save nvzhuang-costume-tryon:latest | gzip | ssh -p <SSH_PORT> <ADMIN_USER>@<STANDBY_IP> 'gunzip | sudo docker load'
+   # 热备：Nginx 镜像已在 compose 中按摘要固定，直接拉取同一摘要（内容由摘要保证一致；按摘要拉取的镜像没有 tag，docker save 传输后会丢失摘要信息）
+   dc pull nginx
    # 两边分别执行，输出必须一致
-   sudo docker image inspect -f '{{.Id}}' nvzhuang-costume-tryon:latest nginx:1.28-alpine
+   sudo docker image inspect -f '{{.Id}}' nvzhuang-costume-tryon:latest "$(dc config --images | grep '^nginx')"
    ```
    热备上用 `dc up -d --no-build` 启动（不要 `build`）。
 4. **证书**：DNS 指向主节点时热备无法通过 HTTP-01 签发。二选一：

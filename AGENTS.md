@@ -149,7 +149,7 @@ nvzhuang/
 以下行为均有回归测试覆盖，修改相关代码时不得削弱：
 
 1. **路由与中间件**：受保护接口（`/tryon`、`/comfyui/health`）在 `cmd.RegisterRoutes` 中以路由组挂载 `BodyLimit → Auth → RateLimit → TryonGate`，不依赖 `r.URL.Path` 精确匹配；需要按路径判断时一律先 `middleware.NormalizePath`。`//tryon`、`/tryon/` 等写法必须同样被拦截。外层组依次为 `RequestID → HandlerResponse → CORS`。`TryonGate` 在框架解析请求体**之前**对 `POST /tryon`（含各种路径写法）只接受 `application/json`（否则 400 `INVALID_REQUEST`），并先占用并发槽位（满则 429 `CONCURRENCY_LIMITED`），不得移到解析之后。
-2. **SSRF 防护（`logic/tryon/netguard.go`）**：浏览器传入的 `client_config` 视为不可信——Base URL 必须 HTTPS、无用户信息，端口在 `security.clientModelAllowedPorts`（默认 `[443]`）内；拒绝 localhost 与 IANA 特殊用途地址全表（含 CGNAT/云元数据 `100.100.100.200`、`169.254/16`、`198.18/15`、NAT64、6to4、IPv4 映射地址等），并在**拨号阶段**对 DNS 解析结果再次校验（防 DNS rebinding），不走系统代理。
+2. **SSRF 防护（`logic/tryon/netguard.go`）**：浏览器传入的 `client_config` 视为不可信——Base URL 必须 HTTPS、无用户信息，域名在 `security.clientModelAllowedHosts` 白名单内（精确主机名或 `*.后缀`，默认三家官方域名 + 服务端 `llm.models` 的 HTTPS 域名，拒绝提示为固定文案、不回显白名单），端口在 `security.clientModelAllowedPorts`（默认 `[443]`）内；拒绝 localhost 与 IANA 特殊用途地址全表（含 CGNAT/云元数据 `100.100.100.200`、`169.254/16`、`198.18/15`、NAT64、6to4、IPv4 映射地址等），并在**拨号阶段**对 DNS 解析结果再次校验（防 DNS rebinding），不走系统代理。
 3. **结果图片下载**：上游返回的 URL 默认按不可信处理（仅 HTTPS 公网 443）；仅当模型来自服务端配置、且结果地址与其 `baseURL` 同源时才使用可信客户端（允许内网/http/非 443）。下载不携带任何鉴权头，限制大小与重定向次数。
 4. **重定向与响应体**：模型接口只允许同协议同主机重定向（最多 3 次，防 `x-goog-api-key` 等外泄）；上游响应体限量读取（生成结果 64 MiB、视觉 1 MiB、错误体 4 KiB）。
 5. **远程地址 HTTPS**：服务端与前端对非本机地址一律要求 HTTPS；只有本机回环允许 http。
@@ -159,11 +159,11 @@ nvzhuang/
 9. **CORS**：`security.trustedOrigins` 精确匹配白名单，禁止 `*`，响应带 `Vary: Origin`。
 10. **暴露面**：Swagger/OpenAPI 默认关闭；compose 仅绑定 `127.0.0.1:8000`，容器非 root、只读根文件系统；保留 `config.example.yaml` 回退与 `:8000` 兜底。
 11. **探针与停机**：`/healthz`、`/readyz` 不鉴权，因此绝不调用付费上游、不返回错误细节；停机由 `cmd.Serve` 处理（readyz 先失败 → drainDelay → 等待在途请求最多 `shutdown.timeoutSeconds`），不得改回 GoFrame 默认信号处理（会中断在途请求）。
-12. **生产网关（`deploy/`）**：Nginx 全局 `client_max_body_size 64k`，只有 `location ~ ^/tryon/*$` 放宽到 30m（该正则同时覆盖 `/tryon/`、`//tryon`、`/tryon%2F`，共用严格限流）；80/443 都有 `default_server` 兜底，未知 Host / 无 SNI 一律 444（443 兜底仅放行容器自检 `/healthz`）；请求体临时文件挂磁盘卷 `nginx-body-temp`；compose 只以 `0.0.0.0:` 发布 80/443（不发布 IPv6，避免 IPv6 连接被 docker-proxy 变成网关地址 `172.30.0.1`），探针白名单只有 `127.0.0.1`、`::1`、`172.30.0.1`。由 `TestNginxComposeSecurityHardening` 与 `deploy/nginx/smoke-test.sh` 覆盖。
+12. **生产网关（`deploy/`）**：Nginx 全局 `client_max_body_size 64k`，只有 `location ~ ^/tryon/*$` 放宽到 30m（该正则同时覆盖 `/tryon/`、`//tryon`、`/tryon%2F`，共用严格限流）；80/443 都有 `default_server` 兜底，未知 Host / 无 SNI 一律 444（443 兜底仅放行容器自检 `/healthz`）；请求体临时文件挂磁盘卷 `nginx-body-temp`；compose 只以 `0.0.0.0:` 发布 80/443（不发布 IPv6，避免 IPv6 连接被 docker-proxy 变成网关地址 `172.30.0.1`），探针白名单只有 `127.0.0.1`、`::1`、`172.30.0.1`。`/tryon` 无 `Authorization: Bearer <非空>` 时 Nginx 在缓冲请求体前返回与 `security.ErrAuthRequired` 完全一致的 401 JSON，只对 `FRONTEND_ORIGIN`（须与 `trustedOrigins` 一致）带 CORS 头，OPTIONS 放行；修改 `ErrAuthRequired` 时同步模板。HSTS 为 `max-age=31536000; includeSubDomains`。Nginx 与 Dockerfile 基础镜像必须写成 `tag@sha256:`（`scripts/image-digests.sh` 检查更新）。由 `TestNginxComposeSecurityHardening`、`TestNginxPreAuthAndHSTS`、`TestDockerImagesPinnedByDigest` 与 `deploy/nginx/smoke-test.sh` 覆盖。
 
 ## 8. 关键配置项（`backend/manifest/config/config.example.yaml`）
 
-- `security.authRequired` / `apiKeysEnv`（默认 `TRYON_API_KEYS`）/ `trustedOrigins` / `allowPrivateNetwork` / `trustedProxies` / `clientModelAllowedPorts`。
+- `security.authRequired` / `apiKeysEnv`（默认 `TRYON_API_KEYS`）/ `trustedOrigins` / `allowPrivateNetwork` / `trustedProxies` / `clientModelAllowedPorts` / `clientModelAllowedHosts`。
 - `security.rateLimit`：`requestsPerMinute`、`burst`、`limiterIdleMinutes`、`dailyRequestsPerPrincipal`；`security.stateDir`：每日额度 bbolt 持久化目录（空 = 纯内存）；只落盘主体哈希 + 日期 + 次数，目录不可用时启动失败，运行期出错降级为内存并使 `/readyz` 的 `state` 失败。
 - `security.concurrency`：`global`、`perPrincipal`、`queueTimeoutSeconds`（默认 0 不排队，最大 60；排队超时与并发拒绝返回 429 + `Retry-After: 5`）。
 - `llm.requestTimeoutSeconds`：云端模型 HTTP 总超时（默认 180，10–1800）；必须小于反向代理读超时（Nginx 建议 300s）且比 `shutdown.timeoutSeconds` 至少小 5 秒。
@@ -184,5 +184,5 @@ nvzhuang/
 - 2026-10-30：深度代码审计，发现 27 项（1 严重、2 高危），修复后合并为 PR #1。
 - 2026-10-31：合并后复审，修复结果图下载回归、新增 `clientModelAllowedPorts`、日志脱敏绕过、错误前缀、前端错误映射与 `-count` 测试不稳定，合并为 PR #2。
 - 2026-10-31：优化方案 v2 阶段 1（本地分支，未推送）：本地门禁 `scripts/check.sh`、GoFrame 2.10.4、探针与优雅停机、模型超时与并发排队、每日额度 bbolt 持久化、中文搜索召回、前端小改进（记录保留/Retry-After/语言记忆/config.js）、生产 `deploy/` 叠加配置（Nginx 容器、trustedProxies /32 与超时链一致性测试）、部署文档。
-- 2026-11-01：安全复审（报告 14 项：中 1、低 7、信息 6）后在本地分支 `fix/security-audit` 修复：TryonGate（解析前校验 JSON 与占用并发槽）、model/lang/size 白名单与模型错误统一文案、响应去掉提示词、日志脱敏邮箱/手机号、Nginx 按路径限制请求体与 `/tryon` 路径变体、default_server 兜底、仅发布 IPv4、请求体临时文件落盘、敏感串正则扩充与快速提交钩子、CSP 去掉 `unsafe-inline`。合并后需更新部署所用的 `DEPLOY_REF`。
+- 2026-11-01：安全复审（报告 14 项：中 1、低 7、信息 6）后在本地分支 `fix/security-audit` 修复：TryonGate（解析前校验 JSON 与占用并发槽）、model/lang/size 白名单与模型错误统一文案、响应去掉提示词、日志脱敏邮箱/手机号、Nginx 按路径限制请求体与 `/tryon` 路径变体、default_server 兜底、仅发布 IPv4、请求体临时文件落盘、敏感串正则扩充与快速提交钩子、CSP 去掉 `unsafe-inline`；按决策追加 Nginx 无 Token 预检（401 带 CORS）、个人模型域名白名单 `clientModelAllowedHosts`、镜像固定摘要与 HSTS `includeSubDomains`。后端 Token 继续保存在 `localStorage`（维持现状）。合并后需更新部署所用的 `DEPLOY_REF`。
 - 参考：`backend/DEPLOY.md`（部署、Nginx、安全与数据流向）、`docs/LINUXDO_RELEASE_AUDIT.md`（审计结论）、`docs/LINUXDO_PUBLISH_CHECKLIST.md`、`docs/2026-10-30_security-image-validation-requirements.md`、`README.md`。

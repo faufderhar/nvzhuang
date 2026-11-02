@@ -240,7 +240,7 @@ security:
 - Key 仅保存在服务器本地环境变量或 `.env`，禁止将包含真实 Key 的 `config.yaml` 或 `.env` 提交到公开仓库。
 - 默认的「服务器预设」模式下，前端不接触服务器 API Key，所有大模型通信均由后端代理中转。
 - 可选的「个人模型配置」由用户主动保存在自己的浏览器，并只随单次 `/tryon` 请求发送。后端不写数据库、配置文件或业务日志；Gemini Key 使用请求头传递，不进入上游 URL。
-- 个人 Base URL 必须为 `https://`、端口默认只能是 443（可通过 `security.clientModelAllowedPorts` 追加，如 `[443, 8443]`），不允许用户名密码、查询参数与片段；拒绝 localhost、内网、CGNAT（含云厂商元数据 100.100.100.200）、NAT64/6to4 等全部 IANA 特殊用途地址，并在建立连接时对 DNS 解析结果再次校验，避免公开后端被滥用为 SSRF 代理。
+- 个人 Base URL 必须为 `https://`、域名必须在 `security.clientModelAllowedHosts` 白名单内（精确主机名或 `*.example.com` 子域名通配；不写时默认 `api.openai.com`、`ark.cn-beijing.volces.com`、`generativelanguage.googleapis.com`，服务端 `llm.models` 中 HTTPS baseURL 的域名启动时自动追加；不在白名单返回 400 且不回显白名单内容）、端口默认只能是 443（可通过 `security.clientModelAllowedPorts` 追加，如 `[443, 8443]`），不允许用户名密码、查询参数与片段；拒绝 localhost、内网、CGNAT（含云厂商元数据 100.100.100.200）、NAT64/6to4 等全部 IANA 特殊用途地址，并在建立连接时对 DNS 解析结果再次校验，避免公开后端被滥用为 SSRF 代理。
 - 上游重定向：模型接口只允许同协议同主机的重定向（最多 3 次），防止 `x-goog-api-key` 等自定义头被转发到其他主机；结果图片下载只允许 HTTPS。
 - 结果图片地址：浏览器自定义模型返回的结果 URL 一律按不可信处理（仅 HTTPS 公网地址）；服务端 `config.yaml` 中配置的模型若返回与其 `baseURL` **同源**（协议、主机、端口均相同）的结果地址，则视为可信，允许是内网、`http://` 或非 443 端口的自建中转站；其它来源的结果地址仍按不可信处理。下载结果图片时不携带任何鉴权头。
 - 上游响应体积：模型响应上限 64 MiB，错误响应只读取前 4 KiB，视觉分析响应上限 1 MiB。
@@ -297,7 +297,9 @@ node ../tests/frontend_tryon_test.mjs
 - **请求缓冲**：Nginx `proxy_request_buffering on`，只有 `/tryon` 允许 30m 请求体（其它路径 64k），超过 1 MB 的部分写入磁盘卷 `nginx-body-temp`；慢速上传不会占用后端并发槽；
 - **解析前门禁**：后端 `TryonGate` 在解析 JSON / 解码图片之前校验 `Content-Type: application/json` 并占用并发槽位，同一 Token 的并发大请求不会先把内存放大再被拒绝；
 - **仅 IPv4 发布**：compose 以 `0.0.0.0:80/443` 发布，IPv6 入站不会被 docker-proxy 变成网关地址 `172.30.0.1`（否则所有 IPv6 用户共用限流桶、并能访问探针）；
-- **安全头**：HSTS、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、`Permissions-Policy`、API 响应 `Content-Security-Policy: default-src 'none'`，并隐藏 Nginx 版本；
+- **无 Token 预检**：Nginx 对未带 `Authorization: Bearer <非空>` 的 `/tryon` 在缓冲请求体之前直接返回与后端一致的 `401 AUTH_REQUIRED` JSON，并只对 `FRONTEND_ORIGIN`（须与 `trustedOrigins` 一致）带 CORS 头；OPTIONS 预检照常转发，Token 真伪仍由后端校验；
+- **镜像固定摘要**：Nginx 与后端构建/运行镜像均为 `tag@sha256:…`，用 `scripts/image-digests.sh` 检查更新；
+- **安全头**：HSTS（`max-age=31536000; includeSubDomains`，API 域名的所有子域名都必须支持 HTTPS）、`X-Content-Type-Options: nosniff`、`X-Frame-Options: DENY`、`Referrer-Policy: no-referrer`、`Permissions-Policy`、API 响应 `Content-Security-Policy: default-src 'none'`，并隐藏 Nginx 版本；
 - **额度持久化**：`stateDir: /app/data`（compose 的 `tryon-state` 卷），重启后每日额度不清零；
 - **容量**：4c24g 建议全局并发 6、排队 10s、`GOMEMLIMIT=2GiB`、容器 3 GiB 上限（见第五节第 3 条的实测数据）。
 
