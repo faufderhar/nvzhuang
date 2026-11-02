@@ -173,7 +173,7 @@ assert.match(context.getErrorMessageFromResponse({status: 200, ok: true}, null).
   assert.ok(!policy.includes("'unsafe-eval'"), 'CSP must not allow eval');
   assert.match(policy, /connect-src [^;]*https:/, 'CSP must allow https backends');
   assert.match(policy, /connect-src [^;]*http:\/\/127\.0\.0\.1:\*/, 'CSP must allow loopback backend');
-  assert.match(policy, /script-src 'self' 'unsafe-inline';/, 'no third-party script origins allowed');
+  assert.match(policy, /script-src 'self'( 'sha256-[A-Za-z0-9+/=]+')+;/, 'no third-party script origins or unsafe-inline allowed');
   assert.ok(html.indexOf('Content-Security-Policy') < html.indexOf('<script'), 'CSP must precede first script');
 }
 

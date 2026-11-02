@@ -45,7 +45,8 @@
 ```bash
 scripts/check.sh              # 常规检查：禁止文件、敏感串扫描、vet/test/race/govulncheck、全部前端测试、Shell 语法
 scripts/check.sh --release    # 发布前：额外 -count=5、构建镜像、trivy/grype 镜像扫描、端到端测试（如已提供 scripts/e2e.sh）
-git config core.hooksPath .githooks   # 可选：启用提交前钩子自动运行 check.sh
+scripts/check.sh --staged     # 快速：只扫描暂存区的敏感串与禁止文件（秒级）
+scripts/check.sh --install-hook  # 推荐：启用 .githooks/pre-commit（默认走 --staged；NVZ_HOOK_FULL=1 git commit 时跑完整检查）
 ```
 
 本项目不使用云端 CI，以上检查全部在本机执行。
@@ -58,7 +59,9 @@ git config core.hooksPath .githooks   # 可选：启用提交前钩子自动运�
   - 无个人姓名、电话、私有私人邮箱、个人电脑私有路径；
   - 无调试时遗留的临时硬编码凭证。
 - [ ] **步骤 3：敏感字符串安全扫描**
-  对修改文件执行正则扫描，确保无符合正则 `(sk-[a-zA-Z0-9]{20,}|AIza[a-zA-Z0-9]{20,})` 的高危私钥。
+  对修改文件执行正则扫描，确保无符合下列正则的高危私钥（与 `scripts/check.sh` 的 `SECRET_RE` 保持一致，覆盖 `sk-proj-` 等带连字符的新格式、GitHub / Slack / AWS 令牌与 PEM 私钥头）：
+  `(sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{20,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{30,}|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|-----BEGIN [A-Z ]*PRIVATE KEY-----)`
+  测试里确需形似密钥的字符串时，用运行时拼接（如 `"sk-" + "proj-..."`），不要写成完整字面量。
 - [ ] **步骤 4：自动化测试与构建校验**（在 `backend/` 下执行，全部通过才可提交）
   ```bash
   go vet ./...
@@ -104,7 +107,9 @@ nvzhuang/
 ├── tests/frontend_tryon_test.mjs  # 前端 Node 测试（从 index.html 抽取函数在 vm 中断言）
 ├── tests/search_test.mjs          # 搜索召回/性能回归（中文子串、英文与 ID 前缀）
 ├── tests/frontend_small_wins_test.mjs # 生成记录保留（≤50 条）、Retry-After/网关错误映射、语言记忆、config.js 约束、存储禁用不崩溃与函数不重复定义
-├── scripts/check.sh           # 本地质量门禁（AGENTS.md §3），.githooks/pre-commit 可选调用
+├── tests/csp_test.mjs         # CSP：script-src 禁止 unsafe-inline/unsafe-eval，内联脚本哈希必须与内容一致
+├── scripts/check.sh           # 本地质量门禁（AGENTS.md §3），.githooks/pre-commit 默认调用 --staged 快速模式
+├── scripts/csp-hashes.mjs     # 校验 / 重新生成 index.html 内联脚本的 CSP sha256 哈希（--write）
 ├── docker-compose.yml         # 后端编排（仅绑定 127.0.0.1:8000、read_only、cap_drop）
 ├── deploy/                    # 生产叠加：docker-compose.prod.yml（Nginx 容器 + 固定网络 172.30.0.0/24）、nginx 模板与 JSON 错误页、
 │                              #   config.prod.overrides.yaml、.env.prod.example（仅占位值）、host/init-host.sh、nginx/smoke-test.sh、
@@ -116,7 +121,7 @@ nvzhuang/
     ├── internal/cmd           # 启动：配置回退、:8000 兜底、RegisterRoutes 中间件装配
     ├── internal/controller    # 控制器：参数与图片校验、并发槽与每日额度（调用上游前失败会退还）
     ├── internal/logic/tryon   # 模型适配（openai 兼容/gpt-image、doubao、gemini、comfyui）、提示词、netguard.go 出站安全
-    ├── internal/middleware    # RequestID、HandlerResponse、CORS、BodyLimit、Auth、RateLimit、ClientIP、路径规范化
+    ├── internal/middleware    # RequestID、HandlerResponse、CORS、BodyLimit、Auth、RateLimit、TryonGate、ClientIP、路径规范化
     ├── internal/security      # 安全配置、Token 存储、限流/配额/并发、标准错误码、日志脱敏 RedactSecrets
     ├── internal/imagevalidate # Data URL 解析与图片真实格式/尺寸/像素/大小校验
     ├── internal/lifecycle     # /healthz、/readyz 就绪检查项与优雅停机参数（cmd.Serve 负责信号与停机流程）
@@ -143,21 +148,22 @@ nvzhuang/
 
 以下行为均有回归测试覆盖，修改相关代码时不得削弱：
 
-1. **路由与中间件**：受保护接口（`/tryon`、`/comfyui/health`）在 `cmd.RegisterRoutes` 中以路由组挂载 `BodyLimit → Auth → RateLimit`，不依赖 `r.URL.Path` 精确匹配；需要按路径判断时一律先 `middleware.NormalizePath`。`//tryon`、`/tryon/` 等写法必须同样被拦截。外层组依次为 `RequestID → HandlerResponse → CORS`。
-2. **SSRF 防护（`logic/tryon/netguard.go`）**：浏览器传入的 `client_config` 视为不可信——Base URL 必须 HTTPS、无用户信息，端口在 `security.clientModelAllowedPorts`（默认 `[443]`）内；拒绝 localhost 与 IANA 特殊用途地址全表（含 CGNAT/云元数据 `100.100.100.200`、`169.254/16`、`198.18/15`、NAT64、6to4、IPv4 映射地址等），并在**拨号阶段**对 DNS 解析结果再次校验（防 DNS rebinding），不走系统代理。
+1. **路由与中间件**：受保护接口（`/tryon`、`/comfyui/health`）在 `cmd.RegisterRoutes` 中以路由组挂载 `BodyLimit → Auth → RateLimit → TryonGate`，不依赖 `r.URL.Path` 精确匹配；需要按路径判断时一律先 `middleware.NormalizePath`。`//tryon`、`/tryon/` 等写法必须同样被拦截。外层组依次为 `RequestID → HandlerResponse → CORS`。`TryonGate` 在框架解析请求体**之前**对 `POST /tryon`（含各种路径写法）只接受 `application/json`（否则 400 `INVALID_REQUEST`），并先占用并发槽位（满则 429 `CONCURRENCY_LIMITED`），不得移到解析之后。
+2. **SSRF 防护（`logic/tryon/netguard.go`）**：浏览器传入的 `client_config` 视为不可信——Base URL 必须 HTTPS、无用户信息，域名在 `security.clientModelAllowedHosts` 白名单内（精确主机名或 `*.后缀`，默认三家官方域名 + 服务端 `llm.models` 的 HTTPS 域名，拒绝提示为固定文案、不回显白名单），端口在 `security.clientModelAllowedPorts`（默认 `[443]`）内；拒绝 localhost 与 IANA 特殊用途地址全表（含 CGNAT/云元数据 `100.100.100.200`、`169.254/16`、`198.18/15`、NAT64、6to4、IPv4 映射地址等），并在**拨号阶段**对 DNS 解析结果再次校验（防 DNS rebinding），不走系统代理。
 3. **结果图片下载**：上游返回的 URL 默认按不可信处理（仅 HTTPS 公网 443）；仅当模型来自服务端配置、且结果地址与其 `baseURL` 同源时才使用可信客户端（允许内网/http/非 443）。下载不携带任何鉴权头，限制大小与重定向次数。
 4. **重定向与响应体**：模型接口只允许同协议同主机重定向（最多 3 次，防 `x-goog-api-key` 等外泄）；上游响应体限量读取（生成结果 64 MiB、视觉 1 MiB、错误体 4 KiB）。
 5. **远程地址 HTTPS**：服务端与前端对非本机地址一律要求 HTTPS；只有本机回环允许 http。
 6. **客户端 IP**：限流/配额默认只用 TCP 对端地址；仅当对端属于 `security.trustedProxies` 时，才从 `X-Forwarded-For` 自右向左取第一个非可信地址（其次 `X-Real-IP`）。不可信的私网/回环对端携带转发头时只告警（限频、仅记录对端），绝不采信。生产 `trustedProxies` 只能是 Nginx 容器的 `/32`（`deploy/` 中为 `172.30.0.2/32`），不得放宽为网关或整个 Docker 网段；`TestProdOverridesConsistency` 校验它与 compose、Nginx 模板（`X-Forwarded-For $remote_addr`、`proxy_read_timeout` ≥ 模型超时 + 60s、后端无端口发布）一致。
-7. **错误处理**：上游原始错误绝不回显，经 `security.RedactSecrets` 脱敏后写服务端日志；对外返回固定文案 + `request_id`（`X-Request-ID` 仅接受 1–64 位 `[A-Za-z0-9_-]`，否则重新生成）。HTTP 状态码按真实类型返回：400 参数/配置校验、401 鉴权、403 来源不允许、413 请求体过大、422 图片校验失败、429 限流/额度/并发、500 内部错误、502 上游失败（`UPSTREAM_FAILED`）、503 模型未配置/不支持。生产 Nginx 自身的 JSON 错误页使用 `41300 REQUEST_TOO_LARGE`、`42900 RATE_LIMITED`、`50200 GATEWAY_ERROR`、`50400 GATEWAY_TIMEOUT`（`deploy/nginx/errors/`），新增或修改错误码时同步前端映射与该目录。参数类错误使用 `gerror.NewCode`（不要用会带 “Invalid Parameter:” 前缀的 `WrapCode(..., "")`）。
+7. **错误处理**：上游原始错误绝不回显，经 `security.RedactSecrets` 脱敏后写服务端日志；对外返回固定文案 + `request_id`（`X-Request-ID` 仅接受 1–64 位 `[A-Za-z0-9_-]`，否则重新生成）。HTTP 状态码按真实类型返回：400 参数/配置校验、401 鉴权、403 来源不允许、413 请求体过大、422 图片校验失败、429 限流/额度/并发、500 内部错误、502 上游失败（`UPSTREAM_FAILED`）、503 模型未配置/不支持。生产 Nginx 自身的 JSON 错误页使用 `41300 REQUEST_TOO_LARGE`、`42900 RATE_LIMITED`、`50200 GATEWAY_ERROR`、`50400 GATEWAY_TIMEOUT`（`deploy/nginx/errors/`），新增或修改错误码时同步前端映射与该目录。参数类错误使用 `gerror.NewCode`（不要用会带 “Invalid Parameter:” 前缀的 `WrapCode(..., "")`）。`RedactSecrets` 还会把邮箱、手机号替换为 `[EMAIL]` / `[PHONE]`。`model` 只接受 `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`、`lang` 只接受 `zh|en`、`size` 只接受 `auto` 或 `宽x高`；服务端未配置的模型对外统一返回「模型 X 未配置或暂不可用」，缺 Key / 缺 model 名等细节只写脱敏日志；响应不返回系统提示词。
 8. **Token**：只保存 SHA-256 并恒定时间比较；启动时拒绝示例/占位与低熵 Token，`authRequired: true` 且无有效 Token 时启动失败。
 9. **CORS**：`security.trustedOrigins` 精确匹配白名单，禁止 `*`，响应带 `Vary: Origin`。
 10. **暴露面**：Swagger/OpenAPI 默认关闭；compose 仅绑定 `127.0.0.1:8000`，容器非 root、只读根文件系统；保留 `config.example.yaml` 回退与 `:8000` 兜底。
 11. **探针与停机**：`/healthz`、`/readyz` 不鉴权，因此绝不调用付费上游、不返回错误细节；停机由 `cmd.Serve` 处理（readyz 先失败 → drainDelay → 等待在途请求最多 `shutdown.timeoutSeconds`），不得改回 GoFrame 默认信号处理（会中断在途请求）。
+12. **生产网关（`deploy/`）**：Nginx 全局 `client_max_body_size 64k`，只有 `location ~ ^/tryon/*$` 放宽到 30m（该正则同时覆盖 `/tryon/`、`//tryon`、`/tryon%2F`，共用严格限流）；80/443 都有 `default_server` 兜底，未知 Host / 无 SNI 一律 444（443 兜底仅放行容器自检 `/healthz`）；请求体临时文件挂磁盘卷 `nginx-body-temp`；compose 只以 `0.0.0.0:` 发布 80/443（不发布 IPv6，避免 IPv6 连接被 docker-proxy 变成网关地址 `172.30.0.1`），探针白名单只有 `127.0.0.1`、`::1`、`172.30.0.1`。`/tryon` 无 `Authorization: Bearer <非空>` 时 Nginx 在缓冲请求体前返回与 `security.ErrAuthRequired` 完全一致的 401 JSON，只对 `FRONTEND_ORIGIN`（须与 `trustedOrigins` 一致）带 CORS 头，OPTIONS 放行；修改 `ErrAuthRequired` 时同步模板。HSTS 为 `max-age=31536000; includeSubDomains`。Nginx 与 Dockerfile 基础镜像必须写成 `tag@sha256:`（`scripts/image-digests.sh` 检查更新）。由 `TestNginxComposeSecurityHardening`、`TestNginxPreAuthAndHSTS`、`TestDockerImagesPinnedByDigest` 与 `deploy/nginx/smoke-test.sh` 覆盖。
 
 ## 8. 关键配置项（`backend/manifest/config/config.example.yaml`）
 
-- `security.authRequired` / `apiKeysEnv`（默认 `TRYON_API_KEYS`）/ `trustedOrigins` / `allowPrivateNetwork` / `trustedProxies` / `clientModelAllowedPorts`。
+- `security.authRequired` / `apiKeysEnv`（默认 `TRYON_API_KEYS`）/ `trustedOrigins` / `allowPrivateNetwork` / `trustedProxies` / `clientModelAllowedPorts` / `clientModelAllowedHosts`。
 - `security.rateLimit`：`requestsPerMinute`、`burst`、`limiterIdleMinutes`、`dailyRequestsPerPrincipal`；`security.stateDir`：每日额度 bbolt 持久化目录（空 = 纯内存）；只落盘主体哈希 + 日期 + 次数，目录不可用时启动失败，运行期出错降级为内存并使 `/readyz` 的 `state` 失败。
 - `security.concurrency`：`global`、`perPrincipal`、`queueTimeoutSeconds`（默认 0 不排队，最大 60；排队超时与并发拒绝返回 429 + `Retry-After: 5`）。
 - `llm.requestTimeoutSeconds`：云端模型 HTTP 总超时（默认 180，10–1800）；必须小于反向代理读超时（Nginx 建议 300s）且比 `shutdown.timeoutSeconds` 至少小 5 秒。
@@ -170,11 +176,13 @@ nvzhuang/
 - 所有用户可见文案放入 `I18N.zh` / `I18N.en` 并同时补齐；后端固定错误码（AUTH_*、REQUEST_TOO_LARGE、IMAGE_*、RATE_LIMITED、UPSTREAM_FAILED、INTERNAL_ERROR 等）在 `getErrorMessageFromResponse` 中映射为本地化文案，仅 400 校验类错误展示后端具体原因。
 - `?tryon=` 仅接受同源或本机回环地址（`parseSafeTryonParam`），跨源一律忽略；设置中心手动填写的后端地址允许本机回环或远程 HTTPS，校验需与后端一致；个人模型（非 ComfyUI）Base URL 必须是公网 HTTPS（`validCustomModelBaseUrl`）。`client_config`（含用户 API Key）只发往受信任目标（设置中的后端、本机回环或同源）。
 - 收到 413 时提示用户并自动勾选“上传前压缩”，由用户重新提交（不自动重发）。
-- 插入 HTML 前必须经 `esc()` 转义；遵守页面 CSP，不引入外部脚本。
+- 插入 HTML 前必须经 `esc()` 转义；遵守页面 CSP，不引入外部脚本。CSP 的 `script-src` 不允许 `'unsafe-inline'`，内联脚本靠 sha256 哈希放行：**修改任何内联 `<script>` 后必须运行 `node scripts/csp-hashes.mjs --write`**（`tests/csp_test.mjs` 会在哈希过期时失败）；不得使用 `onclick=` 等内联事件属性。
+- 后端 Token 默认保存在 `localStorage`（勾选“仅本次会话”时只写 `sessionStorage`）。这是体验与 XSS 暴露面之间的取舍：任何能在页面执行脚本的攻击都能读到它，因此上面的 CSP 与 `esc()` 约束是 Token 安全的前提；共享电脑请提示用户使用“仅本次会话”。
 
 ## 10. 审计历史与参考文档
 
 - 2026-10-30：深度代码审计，发现 27 项（1 严重、2 高危），修复后合并为 PR #1。
 - 2026-10-31：合并后复审，修复结果图下载回归、新增 `clientModelAllowedPorts`、日志脱敏绕过、错误前缀、前端错误映射与 `-count` 测试不稳定，合并为 PR #2。
 - 2026-10-31：优化方案 v2 阶段 1（本地分支，未推送）：本地门禁 `scripts/check.sh`、GoFrame 2.10.4、探针与优雅停机、模型超时与并发排队、每日额度 bbolt 持久化、中文搜索召回、前端小改进（记录保留/Retry-After/语言记忆/config.js）、生产 `deploy/` 叠加配置（Nginx 容器、trustedProxies /32 与超时链一致性测试）、部署文档。
+- 2026-11-01：安全复审（报告 14 项：中 1、低 7、信息 6）后在本地分支 `fix/security-audit` 修复：TryonGate（解析前校验 JSON 与占用并发槽）、model/lang/size 白名单与模型错误统一文案、响应去掉提示词、日志脱敏邮箱/手机号、Nginx 按路径限制请求体与 `/tryon` 路径变体、default_server 兜底、仅发布 IPv4、请求体临时文件落盘、敏感串正则扩充与快速提交钩子、CSP 去掉 `unsafe-inline`；按决策追加 Nginx 无 Token 预检（401 带 CORS）、个人模型域名白名单 `clientModelAllowedHosts`、镜像固定摘要与 HSTS `includeSubDomains`。后端 Token 继续保存在 `localStorage`（维持现状）。合并后需更新部署所用的 `DEPLOY_REF`。
 - 参考：`backend/DEPLOY.md`（部署、Nginx、安全与数据流向）、`docs/LINUXDO_RELEASE_AUDIT.md`（审计结论）、`docs/LINUXDO_PUBLISH_CHECKLIST.md`、`docs/2026-10-30_security-image-validation-requirements.md`、`README.md`。

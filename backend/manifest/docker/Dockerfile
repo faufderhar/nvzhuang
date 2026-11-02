@@ -1,5 +1,5 @@
 # 构建阶段
-FROM golang:1.26-alpine AS builder
+FROM golang:1.26-alpine@sha256:a2012b4a1d1f9f7e9f44e0d39b805a901e856b1dd80b4e6ee4338db547050308 AS builder
 
 WORKDIR /app
 # 先复制依赖文件，利用 Docker 层缓存
@@ -11,7 +11,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o main .
 
 # 运行阶段
-FROM alpine:3.22
+FROM alpine:3.22@sha256:2e0b81d60597f449baa56dc25d355367869d2dca4cd57e866f1e2b52af3eb55f
 
 # 安装 ca-certificates 确保能够正常调用外部 HTTPS API（OpenAI / 火山方舟 / Google 等）
 RUN apk --no-cache add ca-certificates tzdata \

@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
-# 可选的本地提交钩子：git config core.hooksPath .githooks 启用；git commit --no-verify 可临时跳过。
+# 本地提交钩子：scripts/check.sh --install-hook（等价于 git config core.hooksPath .githooks）启用；
+# git commit --no-verify 可临时跳过。
+# 默认只做快速的暂存区敏感串 / 禁止文件扫描（秒级）；NVZ_HOOK_FULL=1 git commit ... 时运行完整门禁。
 set -euo pipefail
-exec "$(git rev-parse --show-toplevel)/scripts/check.sh"
+root="$(git rev-parse --show-toplevel)"
+if [[ "${NVZ_HOOK_FULL:-0}" == 1 ]]; then
+  exec "$root/scripts/check.sh"
+fi
+exec "$root/scripts/check.sh" --staged

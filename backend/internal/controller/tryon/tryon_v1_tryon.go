@@ -24,7 +24,7 @@ import (
 type ControllerV1 struct{}
 
 // ConcurrencyRetryAfterSeconds 并发已满（含排队超时）时建议客户端的重试间隔。
-const ConcurrencyRetryAfterSeconds = 5
+const ConcurrencyRetryAfterSeconds = middleware.ConcurrencyRetryAfterSeconds
 
 func NewV1() *ControllerV1 {
 	return &ControllerV1{}
@@ -35,7 +35,26 @@ func (c *ControllerV1) Tryon(ctx context.Context, req *v1.TryonReq) (res *v1.Try
 	secService := security.GetService()
 	imgLimits := imagevalidate.LoadImageLimits(ctx)
 
-	// 1. 严格校验两张图片（人像和服装）真实格式、文件大小、尺寸及像素
+	principalID := r.GetCtxVar(middleware.CtxPrincipalID).String()
+	if principalID == "" {
+		principalID = "anonymous"
+	}
+
+	// 1. 先占用并发槽位：被并发限制拒绝的请求不应消耗每日额度。
+	//    生产路由由 middleware.TryonGate 在解析请求体之前占用（防止并发大请求放大内存），这里不再重复；
+	//    未挂载该中间件时（如单元测试）在此占用。全局已满时按 queueTimeoutSeconds 短暂排队（客户端断开即放弃）。
+	if !r.GetCtxVar(middleware.CtxConcurrencyHeld).Bool() {
+		queueWait := time.Duration(secService.Config.Concurrency.QueueTimeoutSeconds) * time.Second
+		release, ok := secService.ConcurrencyManager.AcquireWait(ctx, principalID, queueWait)
+		if !ok {
+			r.Response.Header().Set("Retry-After", strconv.Itoa(ConcurrencyRetryAfterSeconds))
+			middleware.WriteAPIError(r, security.ErrConcurrencyLimited)
+			return nil, nil
+		}
+		defer release()
+	}
+
+	// 2. 严格校验两张图片（人像和服装）真实格式、文件大小、尺寸及像素
 	personImg, garmentImg, imgErr := imagevalidate.ValidateImagesPair(req.PersonImage, req.GarmentImage, imgLimits)
 	if imgErr != nil {
 		if apiErr, ok := imgErr.(*security.APIError); ok {
@@ -45,22 +64,6 @@ func (c *ControllerV1) Tryon(ctx context.Context, req *v1.TryonReq) (res *v1.Try
 		middleware.WriteAPIError(r, security.ErrInvalidImageBase64)
 		return nil, nil
 	}
-
-	principalID := r.GetCtxVar(middleware.CtxPrincipalID).String()
-	if principalID == "" {
-		principalID = "anonymous"
-	}
-
-	// 2. 先占用并发槽位：被并发限制拒绝的请求不应消耗每日额度。
-	//    全局已满时按 security.concurrency.queueTimeoutSeconds 短暂排队（客户端断开即放弃）。
-	queueWait := time.Duration(secService.Config.Concurrency.QueueTimeoutSeconds) * time.Second
-	release, ok := secService.ConcurrencyManager.AcquireWait(ctx, principalID, queueWait)
-	if !ok {
-		r.Response.Header().Set("Retry-After", strconv.Itoa(ConcurrencyRetryAfterSeconds))
-		middleware.WriteAPIError(r, security.ErrConcurrencyLimited)
-		return nil, nil
-	}
-	defer release()
 
 	// 3. 检查并原子扣减每日调用额度
 	if !secService.DailyQuotaTracker.CheckAndDeduct(principalID) {
@@ -79,7 +82,7 @@ func (c *ControllerV1) Tryon(ctx context.Context, req *v1.TryonReq) (res *v1.Try
 		}
 	}
 
-	imageB64, model, prompt, err := tryon.DoTryonWithValidatedImages(
+	imageB64, model, _, err := tryon.DoTryonWithValidatedImages(
 		ctx,
 		personImg,
 		garmentImg,
@@ -101,10 +104,9 @@ func (c *ControllerV1) Tryon(ctx context.Context, req *v1.TryonReq) (res *v1.Try
 		return nil, security.ErrUpstreamFailed
 	}
 	return &v1.TryonRes{
-		Image:  imageB64,
-		MIME:   imageMIME,
-		Model:  model,
-		Prompt: prompt,
+		Image: imageB64,
+		MIME:  imageMIME,
+		Model: model,
 	}, nil
 }
 

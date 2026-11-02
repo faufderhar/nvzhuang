@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"regexp"
 	"strings"
 
 	"github.com/gogf/gf/v2/frame/g"
@@ -20,6 +21,9 @@ type SecurityConfig struct {
 	// ClientModelAllowedPorts 浏览器自定义模型 Base URL 允许使用的 HTTPS 端口，默认仅 443。
 	// 仍强制 HTTPS 与公网地址校验，只放宽端口（如部分中转站使用 8443）。
 	ClientModelAllowedPorts []int `json:"clientModelAllowedPorts"`
+	// ClientModelAllowedHosts 浏览器自定义模型 Base URL 允许的域名：精确匹配，或 "*.example.com" 匹配其任意子域名（不含 example.com 本身）。
+	// 为空时使用 DefaultClientModelAllowedHosts；服务端 llm.models 中 HTTPS baseURL 的域名会在启动时自动追加。
+	ClientModelAllowedHosts []string `json:"clientModelAllowedHosts"`
 	// StateDir 每日额度持久化目录（bbolt 单文件 quota.db）。为空表示纯内存计数（重启清零）。
 	StateDir    string            `json:"stateDir"`
 	RateLimit   RateLimitConfig   `json:"rateLimit"`
@@ -55,6 +59,7 @@ func DefaultSecurityConfig() *SecurityConfig {
 		},
 		AllowPrivateNetwork:     false,
 		ClientModelAllowedPorts: []int{443},
+		ClientModelAllowedHosts: append([]string(nil), DefaultClientModelAllowedHosts...),
 		RateLimit: RateLimitConfig{
 			RequestsPerMinute:         10,
 			Burst:                     3,
@@ -66,6 +71,31 @@ func DefaultSecurityConfig() *SecurityConfig {
 			PerPrincipal: 1,
 		},
 	}
+}
+
+// DefaultClientModelAllowedHosts 默认允许的个人模型域名：与前端预设、config.example.yaml 中的官方服务一致。
+var DefaultClientModelAllowedHosts = []string{
+	"api.openai.com",
+	"ark.cn-beijing.volces.com",
+	"generativelanguage.googleapis.com",
+}
+
+var hostnamePattern = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// NormalizeHostPattern 规范化并校验一条域名白名单规则：转小写、去掉结尾的点；
+// 只接受主机名（如 api.example.com）或 "*." 前缀的通配（如 *.example.com，至少包含两级域名）。
+// 不接受协议、端口、路径、单独的 "*" 或其它位置的通配符。
+func NormalizeHostPattern(p string) (string, error) {
+	n := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(p)), ".")
+	host := strings.TrimPrefix(n, "*.")
+	wildcard := host != n
+	if host == "" || len(host) > 253 || !hostnamePattern.MatchString(host) {
+		return "", fmt.Errorf("security.clientModelAllowedHosts 规则无效: %q（只能写主机名或 *.域名）", p)
+	}
+	if wildcard && !strings.Contains(host, ".") {
+		return "", fmt.Errorf("security.clientModelAllowedHosts 通配规则过宽: %q（至少写到 *.example.com 这一级）", p)
+	}
+	return n, nil
 }
 
 func LoadSecurityConfig(ctx context.Context) (*SecurityConfig, error) {
@@ -89,6 +119,16 @@ func LoadSecurityConfig(ctx context.Context) (*SecurityConfig, error) {
 	}
 	if len(cfg.ClientModelAllowedPorts) == 0 {
 		cfg.ClientModelAllowedPorts = def.ClientModelAllowedPorts
+	}
+	if len(cfg.ClientModelAllowedHosts) == 0 {
+		cfg.ClientModelAllowedHosts = append([]string(nil), DefaultClientModelAllowedHosts...)
+	}
+	for i, h := range cfg.ClientModelAllowedHosts {
+		n, err := NormalizeHostPattern(h)
+		if err != nil {
+			return nil, err
+		}
+		cfg.ClientModelAllowedHosts[i] = n
 	}
 	for _, p := range cfg.ClientModelAllowedPorts {
 		if p < 1 || p > 65535 {

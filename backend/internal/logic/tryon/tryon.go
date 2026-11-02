@@ -3,6 +3,8 @@ package tryon
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/gogf/gf/v2/errors/gcode"
@@ -32,13 +34,21 @@ func DoTryonWithValidatedImages(ctx context.Context, personImg, garmentImg *imag
 	var gen ImageGenerator
 	if clientConfig != nil {
 		gen, err = NewGeneratorFromClientConfig(clientConfig)
+		if err != nil {
+			// 个人模型配置的校验错误是固定文案（不含用户输入），返回给客户端便于用户修正。
+			// 使用 NewCode 而不是 WrapCode，避免错误文案带上 "Invalid Parameter: " 前缀。
+			return "", "", "", gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
+		}
 	} else {
 		gen, err = NewGenerator(ctx, model)
-	}
-	if err != nil {
-		// 模型选择/配置校验错误均为服务端固定文案，可返回给客户端。
-		// 使用 NewCode 而不是 WrapCode，避免错误文案带上 "Invalid Parameter: " 前缀。
-		return "", "", "", gerror.NewCode(gcode.CodeInvalidParameter, err.Error())
+		if err != nil {
+			// 服务端模型配置的具体缺项（缺 Key / 缺 model 名 / provider 不支持）只写服务端日志，
+			// 对外统一文案，不暴露哪些别名已配置、缺什么，也不回显未经约束的用户输入。
+			reqID, _ := ctx.Value("request_id").(string)
+			g.Log().Warningf(ctx, "模型配置不可用 model=%s request_id=%s err=%s",
+				SafeModelAlias(model), reqID, security.RedactSecrets(err.Error()))
+			return "", "", "", gerror.NewCode(gcode.CodeInvalidParameter, fmt.Sprintf("模型 %s 未配置或暂不可用", SafeModelAlias(model)))
+		}
 	}
 
 	var promptStr string
@@ -85,4 +95,16 @@ func logUpstreamError(ctx context.Context, genName string, err error, clientConf
 	reqID, _ := ctx.Value("request_id").(string)
 	g.Log().Warningf(ctx, "换装上游调用失败 model=%s request_id=%s err=%s",
 		genName, reqID, security.RedactSecrets(err.Error(), sensitive...))
+}
+
+// modelAliasPattern 与 api/tryon/v1.TryonReq.Model 的校验规则保持一致。
+var modelAliasPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// SafeModelAlias 返回可安全写入错误文案与日志的模型别名：不符合字符集/长度约束时返回占位符，
+// 防止换行等控制字符伪造日志行（请求层已校验，这里是纵深防御）。
+func SafeModelAlias(alias string) string {
+	if modelAliasPattern.MatchString(alias) {
+		return alias
+	}
+	return "[invalid]"
 }

@@ -32,7 +32,13 @@ deploy/
    - 后端若收到来自**不可信私网/回环对端**且带 `X-Forwarded-For` / `X-Real-IP` 的请求，会每 10 分钟最多记录一次告警（只记录对端地址），提示检查此项。
 2. **Nginx 读超时与模型超时**：`proxy_read_timeout 300s` 必须大于 `llm.requestTimeoutSeconds`（180）+ 60 秒余量；`shutdown.timeoutSeconds`（190）≥ 模型超时 + 5 秒；根 compose 的 `stop_grace_period`（200s）≥ drainDelay + 停机超时。
 
-`backend/internal/cmd/deploy_consistency_test.go`（`TestProdOverridesConsistency`）会交叉校验 compose、Nginx 模板与覆盖配置，任何一处改动不一致都会让 `scripts/check.sh` 失败。
+3. **IPv6 与未知 Host**：compose 只以 `0.0.0.0:80`、`0.0.0.0:443` 发布端口。Docker 默认网络没有 IPv6 地址，IPv6 入站会经 docker-proxy 转成网关 `172.30.0.1`，所有 IPv6 用户将共用一个限流桶、并命中探针白名单；因此不发布 IPv6，探针白名单也只保留 `127.0.0.1`、`::1` 与宿主机本机访问时的 `172.30.0.1`。80/443 另有 `default_server` 兜底：Host 或 SNI 不是 API 域名（按 IP 扫描、伪造 Host）时直接断开（444），443 兜底只放行容器自检 `https://127.0.0.1/healthz`。
+4. **请求体**：全局 `client_max_body_size 64k`，只有 `location ~ ^/tryon/*$`（覆盖 `/tryon/`、`//tryon`、`/tryon%2F` 等写法，共用严格限流）放宽到 30m；超过内存缓冲的部分写入磁盘卷 `nginx-body-temp`，不计入 Nginx 容器的 256 MiB 内存上限。
+5. **无 Token 预检**：`/tryon` 未带 `Authorization: Bearer <非空>` 时，Nginx 在 rewrite 阶段直接返回与后端一致的 `401 {"code":40101,...,"error_code":"AUTH_REQUIRED"}`，不读取、不缓冲请求体（超过 30m 的 Content-Length 仍先返回 413）；OPTIONS 预检照常转发给后端。Nginx 只检查格式，Token 真伪仍由后端校验。该 401 与 JSON 错误页只对 `.env.prod` 中的 `FRONTEND_ORIGIN` 带 `Access-Control-Allow-Origin`（精确匹配），因此 `FRONTEND_ORIGIN` 必须与 `config.yaml` 的 `security.trustedOrigins` 一致，否则前端会显示网络错误而不是“请填写 Token”。无 Token 请求在限流之前返回，不消耗 `/tryon` 限流桶。
+6. **HSTS 含 `includeSubDomains`**：`Strict-Transport-Security: max-age=31536000; includeSubDomains`。浏览器会在一年内对 **API 域名的所有子域名**强制 HTTPS——如果 `API_SERVER_NAME` 下还有只提供 HTTP 的子域名（如 `x.api.example.com`），启用前先为它们配好 HTTPS，或改用独立的 API 域名。HSTS 只对 API 域名本身下发，不影响父域名或前端域名。
+7. **镜像按摘要固定**：`nginx:1.28-alpine`、`golang:1.26-alpine`、`alpine:3.22` 均写成 `tag@sha256:<多架构 index 摘要>`，同一 tag 被重新发布也不会改变构建结果。定期运行 `scripts/image-digests.sh`（只读，访问 Docker Hub）检查是否有新构建；出现 `CHANGED` 时把新摘要写回文件、重新构建并验收后提交。`TestDockerImagesPinnedByDigest` 保证不会退回裸 tag。
+
+`backend/internal/cmd/deploy_consistency_test.go`（`TestProdOverridesConsistency`、`TestNginxComposeSecurityHardening`、`TestNginxPreAuthAndHSTS`、`TestDockerImagesPinnedByDigest`）会交叉校验 compose、Nginx 模板与覆盖配置，任何一处改动不一致都会让 `scripts/check.sh` 失败。
 
 ## 使用步骤（在仓库根目录）
 
@@ -65,7 +71,7 @@ Nginx 自身拦截的请求返回与后端同结构的 JSON（`deploy/nginx/erro
 
 | HTTP | code | error_code | 场景 |
 |---|---|---|---|
-| 413 | 41300 | REQUEST_TOO_LARGE | 请求体超过 `client_max_body_size 30m` |
+| 413 | 41300 | REQUEST_TOO_LARGE | 请求体超过 `client_max_body_size`（`/tryon` 30m，其它路径 64k） |
 | 429 | 42900 | RATE_LIMITED | Nginx `limit_req` / `limit_conn` 限流（附 `Retry-After: 10`） |
 | 502/503 | 50200 | GATEWAY_ERROR | 后端不可达 |
 | 504 | 50400 | GATEWAY_TIMEOUT | 超过 `proxy_read_timeout` |
@@ -75,6 +81,6 @@ Nginx 自身拦截的请求返回与后端同结构的 JSON（`deploy/nginx/erro
 ## 注意
 
 - Docker 发布的端口会绕过 ufw 规则：后端端口已用 `ports: !reset []` 清除，只有 Nginx 的 80/443 对外；不要再给后端加端口映射。
-- `/healthz`、`/readyz` 在 Nginx 上只允许本机与内部网络访问，外部监控请通过 SSH 隧道或在主机上执行。
-- API 域名只配 A 记录、不要配 AAAA：Nginx 容器没有 IPv6 地址，IPv6 连接会被 Docker 用户态代理转成网关地址 `172.30.0.1`，所有 IPv6 用户将共用一个限流桶，并能访问探针。
-- 本地验证：`NGINX_BIN=/path/to/nginx deploy/nginx/smoke-test.sh`（以 root 运行时还会对生产模板执行 `nginx -t`）。
+- `/healthz`、`/readyz` 在 Nginx 上只允许容器内与宿主机本机访问，外部监控请通过 SSH 隧道或在主机上执行。
+- API 域名只配 A 记录、不要配 AAAA：端口只在 IPv4 上发布，有 AAAA 时 IPv6 客户端会先连接失败再回退。若确需 IPv6，必须先给 compose 网络启用 IPv6（`enable_ipv6` + Docker `ip6tables`）让 Nginx 看到真实地址，再改端口发布并删除探针白名单中的 `172.30.0.1`。
+- 本地验证：`NGINX_BIN=/path/to/nginx deploy/nginx/smoke-test.sh`（以 root 运行，或非 root 但系统支持用户命名空间 `unshare -rn` 时，还会对生产模板执行 `nginx -t`）。

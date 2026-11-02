@@ -130,7 +130,7 @@ fi
 
 # ---------- 2. 安全响应头 ----------
 code="$(req GET /hello)"
-check "HSTS" "$(hdr strict-transport-security)" "max-age=31536000"
+check "HSTS" "$(hdr strict-transport-security)" "max-age=31536000; includeSubDomains"
 check "X-Content-Type-Options" "$(hdr x-content-type-options)" "nosniff"
 check "X-Frame-Options" "$(hdr x-frame-options)" "DENY"
 check "Referrer-Policy" "$(hdr referrer-policy)" "no-referrer"
@@ -150,6 +150,10 @@ fi
 # ---------- 4. 鉴权 ----------
 code="$(req POST /tryon -H 'Content-Type: application/json' --data '{}')"
 check "无 Token → 401 AUTH_REQUIRED" "$code $(json_field error_code)" "401 AUTH_REQUIRED"
+pace
+# Nginx 在缓冲请求体前拦截无 Token 请求：响应必须对前端来源带 CORS 头，前端才能显示“请填写 Token”而不是网络错误
+code="$(req POST /tryon -H "Origin: $FRONTEND_ORIGIN" -H 'Content-Type: application/json' --data '{}')"
+check "无 Token + 前端来源 → 401 且带 CORS 头" "$code $(json_field error_code) $(hdr access-control-allow-origin)" "401 AUTH_REQUIRED $FRONTEND_ORIGIN"
 pace
 code="$(req POST /tryon -H @"$T/bad.hdr" -H 'Content-Type: application/json' --data '{}')"
 check "错误 Token → 401 AUTH_INVALID" "$code $(json_field error_code)" "401 AUTH_INVALID"
@@ -257,6 +261,8 @@ if [ "$LOCAL" = 1 ]; then
   check "后端未发布任何端口" "$(docker port "$BK" 2>/dev/null | wc -l | tr -d ' ')" "0"
   ports="$(docker port "$NG" 2>/dev/null | cut -d' ' -f1 | sort -u | tr '\n' ' ')"
   check "Nginx 只发布 80/443" "$ports" "443/tcp 80/tcp "
+  # IPv6 入站会经 docker-proxy 变成网关地址 172.30.0.1（绕过按 IP 限流、命中探针白名单），生产只发布 IPv4
+  check "Nginx 未在 IPv6 上发布端口" "$(docker port "$NG" 2>/dev/null | grep -c '\[::\]' || true)" "0"
   check "后端重启策略" "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$BK")" "unless-stopped"
   check "Nginx 重启策略" "$(docker inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$NG")" "unless-stopped"
   check "后端内存上限 3 GiB / 3 CPU" "$(docker inspect -f '{{.HostConfig.Memory}} {{.HostConfig.NanoCpus}}' "$BK")" "3221225472 3000000000"

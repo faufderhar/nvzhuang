@@ -10,11 +10,12 @@ type TryonReq struct {
 	// 服装图（base64）
 	GarmentImage string `json:"garment_image" v:"required" dc:"服装图：格式要求同 person_image"`
 	// 模型选择：gemini / gpt-image / doubao（可在后端 config.yaml 的 llm.models 中扩展），默认 gemini
-	Model string `json:"model" d:"gemini" dc:"模型别名：gemini / gpt-image / doubao / comfyui（需在 config.yaml 的 llm.models 中配置，可扩展）"`
+	// 只允许字母、数字与 . _ -（1–64 位）：别名会进入错误文案与日志，必须先限制字符集，防止日志注入与超长回显
+	Model string `json:"model" d:"gemini" v:"regex:^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$#模型别名格式无效" dc:"模型别名：gemini / gpt-image / doubao / comfyui（需在 config.yaml 的 llm.models 中配置，可扩展）"`
 	// 生成尺寸：1024x1024 / 1024x1536 / 1536x1024
-	Size string `json:"size" d:"1024x1536" dc:"输出尺寸"`
+	Size string `json:"size" d:"1024x1536" v:"regex:^(auto|[0-9]{3,4}x[0-9]{3,4})$#输出尺寸格式无效" dc:"输出尺寸"`
 	// 语言：zh / en
-	Lang string `json:"lang" d:"zh" dc:"提示词语言"`
+	Lang string `json:"lang" d:"zh" v:"in:zh,en#语言参数无效" dc:"提示词语言"`
 	// 浏览器端自定义模型配置。仅用于当前请求，后端不得持久化或记录其中的 Key/Base URL。
 	ClientConfig *ClientModelConfig `json:"client_config,omitempty" dc:"当前请求临时使用的用户模型配置"`
 }
@@ -34,10 +35,8 @@ type TryonRes struct {
 	Image string `json:"image" dc:"换装结果图，base64"`
 	// 结果图片的真实 MIME 类型（根据文件签名字节检测）
 	MIME string `json:"mime" dc:"结果图片 MIME 类型"`
-	// 使用的模型
+	// 使用的模型。系统提示词不再返回给客户端（避免向所有 Token 持有者暴露提示词工程）
 	Model string `json:"model" dc:"实际使用的模型"`
-	// 提示词（调试用，可空）
-	Prompt string `json:"prompt,omitempty" dc:"实际使用的提示词"`
 }
 
 type ComfyUIHealthReq struct {

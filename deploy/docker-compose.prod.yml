@@ -31,15 +31,19 @@ services:
         max-file: "5"
 
   nginx:
-    image: nginx:1.28-alpine
+    # 固定到多架构 index 摘要（2026-11-01 查询）；检查是否有新构建：scripts/image-digests.sh
+    image: nginx:1.28-alpine@sha256:a8b39bd9cf0f83869a2162827a0caf6137ddf759d50a171451b335cecc87d236
     container_name: costume-tryon-nginx
     restart: unless-stopped
     depends_on:
       costume-tryon:
         condition: service_healthy
+    # 只在 IPv4 上发布端口：Docker 对 IPv6 入站连接走 docker-proxy，Nginx 看到的来源会变成网关
+    # 172.30.0.1，导致所有 IPv6 用户共用一个限流桶、并能访问只对本机开放的探针。
+    # 如需 IPv6，请先为 compose 网络启用 IPv6（enable_ipv6 + ip6tables），并同步收紧模板中的探针白名单。
     ports:
-      - "80:80"
-      - "443:443"
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
     networks:
       nvzhuang:
         ipv4_address: 172.30.0.2
@@ -47,13 +51,18 @@ services:
       - API_SERVER_NAME=${API_SERVER_NAME:?请在 .env.prod 中设置 API_SERVER_NAME}
       - TLS_CERT_PATH=${TLS_CERT_PATH:?请在 .env.prod 中设置 TLS_CERT_PATH}
       - TLS_KEY_PATH=${TLS_KEY_PATH:?请在 .env.prod 中设置 TLS_KEY_PATH}
+      # 网关自身返回的 401 / 错误页只对这个来源带 CORS 头；必须与 config.yaml 的 security.trustedOrigins 一致
+      - FRONTEND_ORIGIN=${FRONTEND_ORIGIN:?请在 .env.prod 中设置 FRONTEND_ORIGIN}
       # 只替换以下变量，避免误伤 $remote_addr 等 Nginx 变量
-      - NGINX_ENVSUBST_FILTER=^(API_SERVER_NAME|TLS_CERT_PATH|TLS_KEY_PATH)$
+      - NGINX_ENVSUBST_FILTER=^(API_SERVER_NAME|TLS_CERT_PATH|TLS_KEY_PATH|FRONTEND_ORIGIN)$
     volumes:
       - ./deploy/nginx/templates:/etc/nginx/templates:ro
       - ./deploy/nginx/errors:/etc/nginx/errors:ro
       - ${TLS_DIR:?请在 .env.prod 中设置 TLS_DIR}:${TLS_DIR}:ro
       - ${ACME_WEBROOT:-./deploy/nginx/acme}:/var/www/acme:ro
+      # 大请求体（/tryon 最多 30 MB）超过 1 MB 内存缓冲后写入这里；放在磁盘卷而不是 tmpfs，
+      # 避免并发上传计入容器内存（mem_limit 256m）导致 Nginx 被 OOM。Nginx 主进程启动时会自动 chown。
+      - nginx-body-temp:/var/cache/nginx/client_temp
     read_only: true
     tmpfs:
       - /var/cache/nginx
@@ -88,3 +97,7 @@ networks:
         # 固定子网与地址：后端 trustedProxies 只信任 Nginx 的 /32，避免信任整个 Docker 网桥
         - subnet: 172.30.0.0/24
           gateway: 172.30.0.1
+
+volumes:
+  # Nginx 请求体临时文件（可随时删除重建，不含持久数据）
+  nginx-body-temp:

@@ -14,6 +14,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/gogf/gf/v2/frame/g"
+
+	"backend/internal/security"
 )
 
 // 上游响应体读取上限，防止恶意/异常上游返回超大响应耗尽内存。
@@ -97,6 +101,78 @@ var clientAllowedPorts atomic.Pointer[map[string]bool]
 
 func init() {
 	SetClientAllowedPorts([]int{443})
+	SetClientAllowedHosts(security.DefaultClientModelAllowedHosts)
+}
+
+// clientHostAllowlist 浏览器自定义模型 Base URL 的域名白名单（精确匹配 + "*.后缀" 子域名匹配）。
+type clientHostAllowlist struct {
+	exact    map[string]bool
+	suffixes []string // 形如 ".example.com"
+}
+
+var clientAllowedHosts atomic.Pointer[clientHostAllowlist]
+
+// SetClientAllowedHosts 设置个人模型 Base URL 允许的域名；无效规则会被忽略（启动时已由 security 包校验）。
+func SetClientAllowedHosts(patterns []string) {
+	l := &clientHostAllowlist{exact: make(map[string]bool)}
+	for _, p := range patterns {
+		n, err := security.NormalizeHostPattern(p)
+		if err != nil {
+			continue
+		}
+		if strings.HasPrefix(n, "*.") {
+			l.suffixes = append(l.suffixes, n[1:])
+		} else {
+			l.exact[n] = true
+		}
+	}
+	clientAllowedHosts.Store(l)
+}
+
+// ClientAllowedHostCount 返回当前白名单规则数量（用于启动日志）。
+func ClientAllowedHostCount() int {
+	l := clientAllowedHosts.Load()
+	return len(l.exact) + len(l.suffixes)
+}
+
+// isAllowedClientHost 判断已规范化（小写、无结尾点）的主机名是否在白名单中。
+func isAllowedClientHost(host string) bool {
+	l := clientAllowedHosts.Load()
+	if l.exact[host] {
+		return true
+	}
+	for _, suf := range l.suffixes {
+		if len(host) > len(suf) && strings.HasSuffix(host, suf) {
+			return true
+		}
+	}
+	return false
+}
+
+// ServerModelHosts 返回服务端 llm.models 中使用 HTTPS 的 baseURL 域名（管理员配置，视为可信），
+// 启动时追加到个人模型域名白名单。只读本地配置，不发起网络请求。
+func ServerModelHosts(ctx context.Context) []string {
+	val, err := g.Cfg().Get(ctx, "llm.models")
+	if err != nil || val.IsEmpty() {
+		return nil
+	}
+	seen := map[string]bool{}
+	var hosts []string
+	for alias := range val.Map() {
+		raw := g.Cfg().MustGet(ctx, "llm.models."+alias+".baseURL", "").String()
+		u, err := url.Parse(strings.TrimSpace(raw))
+		if err != nil || u.Scheme != "https" {
+			continue
+		}
+		h, err := security.NormalizeHostPattern(u.Hostname())
+		if err != nil || seen[h] {
+			continue
+		}
+		seen[h] = true
+		hosts = append(hosts, h)
+	}
+	sort.Strings(hosts)
+	return hosts
 }
 
 // SetClientAllowedPorts 设置浏览器自定义模型 Base URL 允许的端口；空列表或无效端口时回退为 443。

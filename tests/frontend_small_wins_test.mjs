@@ -41,7 +41,7 @@ const run = (code, globals = {}) => {
   const zh = {
     errRateLimited: '请求过于频繁', errConcurrencyLimited: '当前生成任务较多', errDailyQuotaExceeded: '今日生成额度已用完，请明天再试',
     aiGatewayTimeout: '生成超时', aiGatewayErr: '网关不可用', aiHttpErr: '换装服务返回异常', aiInvalidResponse: '无法识别', aiFailed: '换装失败',
-    errRequestTooLarge: '请求过大',
+    errRequestTooLarge: '请求过大', errAuthRequired: '请在设置中心填写后端访问 Token',
   };
   const ctx = run([
     'const tryonSettings = { useCustom: false };',
@@ -79,6 +79,14 @@ const run = (code, globals = {}) => {
   assert.equal(getErrorMessageFromResponse(resp(504), null).code, 'GATEWAY_TIMEOUT');
   assert.equal(getErrorMessageFromResponse(resp(502), null).code, 'GATEWAY_ERROR');
   assert.equal(getErrorMessageFromResponse(resp(413), null).code, 'REQUEST_TOO_LARGE');
+  // 生产 Nginx 对无 Token 的 /tryon 直接返回 401：从模板读取 return 401 的响应体，确保前端显示“请填写 Token”而不是网络错误
+  const tmpl = fs.readFileSync(new URL('../deploy/nginx/templates/nvzhuang.conf.template', import.meta.url), 'utf8');
+  const m401 = tmpl.match(/return 401 '(\{.*\})';/);
+  assert.ok(m401, 'Nginx 模板应包含无 Token 的 401 JSON');
+  const body401 = JSON.parse(m401[1].replace('$request_id', '0123456789abcdef0123456789abcdef'));
+  info = getErrorMessageFromResponse(resp(401), body401);
+  assert.equal(info.code, 'AUTH_REQUIRED');
+  assert.ok(info.text.includes('Token'));
   // 生产 Nginx JSON 错误页：直接读取仓库内的 deploy/nginx/errors/*.json，确保前后端约定一致
   const nginxPages = { 413: 'REQUEST_TOO_LARGE', 429: 'RATE_LIMITED', 502: 'GATEWAY_ERROR', 504: 'GATEWAY_TIMEOUT' };
   for (const [status, want] of Object.entries(nginxPages)) {
@@ -196,8 +204,8 @@ for (const key of ['retryAfterSuffix', 'retryCountdown', 'retryReady', 'aiGatewa
   assert.ok(!/sk-|AIza|Bearer/.test(configJs.replace(/^\/\/.*$/gm, '')));
   const cfgIdx = html.indexOf('<script src="config.js"></script>');
   assert.ok(cfgIdx > 0 && cfgIdx < html.indexOf('<script src="data.js"></script>'), 'config.js 应在 data.js 之前加载');
-  // CSP 未放宽
-  assert.ok(html.includes("script-src 'self' 'unsafe-inline';"));
+  // CSP 未放宽：script-src 只允许同源与内联脚本哈希（详见 tests/csp_test.mjs）
+  assert.match(html, /script-src 'self'( 'sha256-[A-Za-z0-9+/=]+')+;/);
 
   const ctx = run([fn('isLoopbackHost'), fn('sanitizeConfiguredApi'), 'globalThis.f = sanitizeConfiguredApi;'].join('\n'),
     { location: { origin: 'https://site.example', hostname: 'site.example' } });
