@@ -130,7 +130,7 @@ fi
 
 # ---------- 2. 安全响应头 ----------
 code="$(req GET /hello)"
-check "HSTS" "$(hdr strict-transport-security)" "max-age=31536000"
+check "HSTS" "$(hdr strict-transport-security)" "max-age=31536000; includeSubDomains"
 check "X-Content-Type-Options" "$(hdr x-content-type-options)" "nosniff"
 check "X-Frame-Options" "$(hdr x-frame-options)" "DENY"
 check "Referrer-Policy" "$(hdr referrer-policy)" "no-referrer"
@@ -150,6 +150,10 @@ fi
 # ---------- 4. 鉴权 ----------
 code="$(req POST /tryon -H 'Content-Type: application/json' --data '{}')"
 check "无 Token → 401 AUTH_REQUIRED" "$code $(json_field error_code)" "401 AUTH_REQUIRED"
+pace
+# Nginx 在缓冲请求体前拦截无 Token 请求：响应必须对前端来源带 CORS 头，前端才能显示“请填写 Token”而不是网络错误
+code="$(req POST /tryon -H "Origin: $FRONTEND_ORIGIN" -H 'Content-Type: application/json' --data '{}')"
+check "无 Token + 前端来源 → 401 且带 CORS 头" "$code $(json_field error_code) $(hdr access-control-allow-origin)" "401 AUTH_REQUIRED $FRONTEND_ORIGIN"
 pace
 code="$(req POST /tryon -H @"$T/bad.hdr" -H 'Content-Type: application/json' --data '{}')"
 check "错误 Token → 401 AUTH_INVALID" "$code $(json_field error_code)" "401 AUTH_INVALID"

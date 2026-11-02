@@ -1,7 +1,8 @@
-# nvzhuang 生产反向代理模板（官方 nginx 镜像启动时只对下列三个环境变量占位符做 envsubst，见 compose 的 NGINX_ENVSUBST_FILTER）
+# nvzhuang 生产反向代理模板（官方 nginx 镜像启动时只对下列四个环境变量占位符做 envsubst，见 compose 的 NGINX_ENVSUBST_FILTER）
 # 需要的环境变量（见 deploy/.env.prod.example，均为占位值）：
 #   API_SERVER_NAME   对外 API 域名，例如 api.example.com
 #   TLS_CERT_PATH     证书链路径（容器内），TLS_KEY_PATH 私钥路径（容器内）
+#   FRONTEND_ORIGIN   前端来源（协议+主机，无路径），必须与后端 security.trustedOrigins 中的值一致
 # 拓扑：客户端 → 本容器（172.30.0.2，唯一对外发布 80/443）→ 后端容器（172.30.0.10:8000，不发布端口）
 # 后端 security.trustedProxies 必须是 ["172.30.0.2/32"]，否则限流/额度会把所有用户算作同一个代理地址。
 
@@ -11,6 +12,27 @@ limit_req_zone  $binary_remote_addr zone=api_req:10m   rate=60r/m;
 limit_conn_zone $binary_remote_addr zone=per_ip_conn:10m;
 limit_req_status  429;
 limit_conn_status 429;
+
+# ---- 网关自身产生的响应（无 Token 的 401、JSON 错误页）所用的 CORS 来源 ----
+# 只回显与 FRONTEND_ORIGIN 完全一致的 Origin（与后端 trustedOrigins 精确匹配逻辑一致）；其它来源不带 CORS 头。
+# 后端代理回来的响应由后端自己加 CORS 头，这里不能再加，否则浏览器会因重复的 Access-Control-Allow-Origin 拒绝。
+map $http_origin $gw_cors_origin {
+    default "";
+    "${FRONTEND_ORIGIN}" $http_origin;
+}
+
+# ---- /tryon 在缓冲请求体之前的 Token 预检 ----
+# 只检查是否带 "Authorization: Bearer <非空>"（不区分大小写，与后端解析一致），Token 真伪仍由后端校验。
+# OPTIONS 预检不带 Authorization，必须放行给后端处理 CORS。
+map $http_authorization $gw_has_bearer {
+    default 0;
+    "~*^bearer[ \t]+[^ \t]" 1;
+}
+map "$request_method:$gw_has_bearer" $gw_tryon_missing_bearer {
+    default 0;
+    "OPTIONS:0" 0;
+    "~:0$" 1;
+}
 
 upstream nvzhuang_backend {
     server 172.30.0.10:8000 max_fails=0;
@@ -73,7 +95,7 @@ server {
     merge_slashes on;
 
     # 安全响应头（API 只返回 JSON）
-    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "no-referrer" always;
@@ -105,12 +127,16 @@ server {
         add_header Retry-After "10" always;
         add_header Cache-Control "no-store" always;
         # 子 location 一旦声明 add_header 就不再继承 server 级的头，安全头需在此重复
-        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
         add_header X-Content-Type-Options "nosniff" always;
         add_header X-Frame-Options "DENY" always;
         add_header Referrer-Policy "no-referrer" always;
         add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
         add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
+        # 网关错误页也带 CORS 头，前端才能读到 JSON 并显示对应提示（而不是“网络错误”）
+        add_header Access-Control-Allow-Origin $gw_cors_origin always;
+        add_header Access-Control-Expose-Headers "X-Request-ID, Retry-After" always;
+        add_header Vary "Origin" always;
     }
 
     # 通用代理设置
@@ -132,6 +158,24 @@ server {
     # $uri 已完成解码、merge_slashes 与 ./.. 归一化，因此 //tryon、/./tryon、/tryon%2F 也会命中这里。
     location ~ ^/tryon/*$ {
         client_max_body_size 30m;
+        default_type application/json;
+        # 无 Bearer Token 时在 rewrite 阶段直接返回，不读取、不缓冲请求体（Content-Length 超过 30m 仍先返回 413）。
+        # 响应体与后端 security.ErrAuthRequired 一致（40101 AUTH_REQUIRED），前端据此提示“请在设置中心填写 Token”。
+        # if 块内声明了 add_header，不再继承 server 级安全头，需在此重复。
+        if ($gw_tryon_missing_bearer) {
+            add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header X-Frame-Options "DENY" always;
+            add_header Referrer-Policy "no-referrer" always;
+            add_header Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()" always;
+            add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
+            add_header Cache-Control "no-store" always;
+            add_header X-Request-ID $request_id always;
+            add_header Access-Control-Allow-Origin $gw_cors_origin always;
+            add_header Access-Control-Expose-Headers "X-Request-ID, Retry-After" always;
+            add_header Vary "Origin" always;
+            return 401 '{"code":40101,"message":"请在设置中心填写后端访问 Token","data":{"error_code":"AUTH_REQUIRED","request_id":"$request_id"}}';
+        }
         limit_req  zone=tryon_req burst=5 nodelay;
         limit_conn per_ip_conn 2;
         proxy_pass http://nvzhuang_backend;
