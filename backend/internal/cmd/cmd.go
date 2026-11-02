@@ -65,6 +65,9 @@ var (
 			}
 
 			logictryon.SetClientAllowedPorts(secService.Config.ClientModelAllowedPorts)
+			serverHosts := logictryon.ServerModelHosts(ctx)
+			logictryon.SetClientAllowedHosts(append(append([]string(nil), secService.Config.ClientModelAllowedHosts...), serverHosts...))
+			g.Log().Infof(ctx, "个人模型 Base URL 域名白名单：%d 条规则（含服务端模型域名 %d 个）", logictryon.ClientAllowedHostCount(), len(serverHosts))
 
 			modelTimeout, err := logictryon.LoadModelRequestTimeout(ctx)
 			if err != nil {

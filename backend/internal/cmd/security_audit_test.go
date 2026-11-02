@@ -136,3 +136,18 @@ func TestRoutesConcurrencyAcquiredBeforeBodyParse(t *testing.T) {
 		t.Fatalf("want 429 CONCURRENCY_LIMITED before parsing, got %d %s", status, body)
 	}
 }
+
+// 决策 3：个人模型 Base URL 必须命中域名白名单；拒绝时返回固定 400 提示，不回显用户输入或白名单内容
+func TestRoutesClientConfigHostAllowlist(t *testing.T) {
+	url := newRoutesTestServer(t, "audit-hosts", true, 100, 8<<20, nil)
+	img := testPNGB64(300, 300)
+	body, _ := json.Marshal(map[string]interface{}{"person_image": img, "garment_image": img, "model": "x",
+		"client_config": map[string]string{"provider": "openai", "base_url": "https://relay.attacker.example/v1", "api_key": "k", "model": "m"}})
+	status, resp := postTryonRaw(t, url, "application/json", body)
+	if status != http.StatusBadRequest || !strings.Contains(resp, "不在服务端允许的模型服务列表中") {
+		t.Fatalf("non-allowlisted host: want 400 allowlist message, got %d %s", status, resp)
+	}
+	if strings.Contains(resp, "attacker") || strings.Contains(resp, "googleapis") {
+		t.Fatalf("response must not echo user input or allowlist: %s", resp)
+	}
+}

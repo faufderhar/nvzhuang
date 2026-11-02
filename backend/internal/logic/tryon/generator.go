@@ -209,6 +209,10 @@ func validateClientModelConfig(cfg *ModelConfig) error {
 	if addr, err := netip.ParseAddr(host); err == nil && isForbiddenAddr(addr) {
 		return fmt.Errorf("Base URL 不允许指向内网或保留地址")
 	}
+	// 域名白名单（security.clientModelAllowedHosts + 服务端模型域名）；提示中不回显白名单内容与用户输入
+	if !isAllowedClientHost(host) {
+		return fmt.Errorf("Base URL 的域名不在服务端允许的模型服务列表中，请联系管理员添加")
+	}
 	return nil
 }
 
