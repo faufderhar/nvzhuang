@@ -10,11 +10,12 @@ import (
 	"github.com/gogf/gf/v2/frame/g"
 )
 
-// DefaultDoubaoModel 默认的豆包模型：Seedream 5.0 pro 支持多参考图生图（2–10 张），火山方舟模型列表中为推荐、未标记下线。
+// DefaultDoubaoModel 默认的豆包模型：Seedream 5.0 flash 支持多参考图生图（最多 10 张），火山方舟模型列表中为推荐、未标记下线；
+// 不支持组图参数 sequential_image_generation，size 支持 1K/1.5K/2K 档位或总像素 [921600, 4624220] 的宽x高。
 // doubao-seedream-3-0-t2i-* 只支持文生图，会忽略人像与服装参考图，不适合换装。
 // 参考：https://ark.volcengine.com/region:cn-beijing/docs/model-list 、
 // https://ark.volcengine.com/region:cn-beijing/docs/image-generation-api
-const DefaultDoubaoModel = "doubao-seedream-5-0-pro-260628"
+const DefaultDoubaoModel = "doubao-seedream-5-0-flash-260915"
 
 // Doubao 火山方舟（豆包 Seedream）图像生成适配器。
 // 注意：豆包虽复用 /images/generations 路径，但请求体是火山自定义格式：
@@ -56,7 +57,7 @@ type doubaoRequest struct {
 	Image          []string `json:"image,omitempty"`           // 参考图 URL（多图生图）
 	Size           string   `json:"size,omitempty"`            // 如 "2048x2048" / "1024x1536"
 	ResponseFormat string   `json:"response_format,omitempty"` // url / b64_json
-	Watermark      bool     `json:"watermark,omitempty"`
+	Watermark      bool     `json:"watermark"`                 // 官方默认 true（右下角“AI 生成”），这里显式关闭
 }
 
 func (d *Doubao) Generate(ctx context.Context, personB64, garmentB64, prompt, size string) (string, error) {
@@ -80,6 +81,7 @@ func (d *Doubao) Generate(ctx context.Context, personB64, garmentB64, prompt, si
 		},
 		Size:           normalizeDoubaoSize(size),
 		ResponseFormat: "url",
+		Watermark:      false,
 	}
 
 	return postImageGeneration(ctx, d.client, d.baseURL, d.apiKey, reqBody, "豆包 API", d.resultOrigin)
@@ -91,7 +93,7 @@ func isDoubaoTextOnlyModel(model string) bool {
 }
 
 // normalizeDoubaoSize 把 OpenAI 风格的尺寸映射为 Seedream 4.0 / 4.5 / 5.0 都接受的像素值。
-// 官方限制（图片生成 API 文档 size 字段）：5.0 pro/flash 总像素 [921600, 4624220]，
+// 尺寸与模型无关：官方限制（图片生成 API 文档 size 字段）为 5.0 pro/flash 总像素 [921600, 4624220]，
 // 4.5 与 5.0 lite 总像素 [3686400, 16777216]，4.0 为 [921600, 16777216]；三者交集内取官方 2K 档参考值：
 // 竖版 2:3 → 1664x2496，横版 3:2 → 2496x1664，方形 → 2048x2048。
 func normalizeDoubaoSize(size string) string {

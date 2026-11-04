@@ -26,7 +26,7 @@ func TestNormalizeDoubaoSizeWithinSeedreamLimits(t *testing.T) {
 		if _, err := fmtSscan(got, &w, &h); err != nil {
 			t.Fatal(err)
 		}
-		// 必须同时落在 5.0 pro [921600,4624220] 与 4.5 [3686400,16777216] 的总像素区间
+		// 必须同时落在 5.0 flash/pro [921600,4624220] 与 4.5/5.0 lite [3686400,16777216] 的总像素区间
 		if px := w * h; px < 3686400 || px > 4624220 {
 			t.Errorf("%s 总像素 %d 不在 Seedream 4.x/5.x 交集内", got, px)
 		}
@@ -56,7 +56,10 @@ func TestDoubaoRequestCarriesReferenceImages(t *testing.T) {
 			t.Errorf("reference image must be lowercase data URI, got %.40s", s)
 		}
 	}
-	// 5.0 pro 不支持组图参数，不应发送
+	if w, ok := body["watermark"]; !ok || w != false {
+		t.Errorf("watermark must be sent as false, got %v (present=%v)", w, ok)
+	}
+	// 5.0 flash/pro 不支持组图参数，不应发送
 	if _, ok := body["sequential_image_generation"]; ok {
 		t.Error("sequential_image_generation should not be sent")
 	}

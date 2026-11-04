@@ -364,7 +364,7 @@ Y
       apiKey: ""
       envKey: "ARK_API_KEY"
       baseURL: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "doubao-seedream-5-0-pro-260628"
+      model: "doubao-seedream-5-0-flash-260915"
 Y
     ;;
     *) echo "未知模型: $1" >&2; return 1 ;;
