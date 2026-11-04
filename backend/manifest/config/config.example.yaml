@@ -127,7 +127,7 @@ llm:
       apiKey: ""                # 或用环境变量 ARK_API_KEY
       envKey: "ARK_API_KEY"
       baseURL: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "doubao-seedream-3-0-t2i-250415"
+      model: "doubao-seedream-5-0-pro-260628"  # 需支持多参考图；3.0-t2i 只能文生图，会忽略参考图
 
     # Google Gemini 图像（Nano Banana 2，即 gemini-3.1-flash-image）
     gemini:

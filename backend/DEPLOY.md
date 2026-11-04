@@ -91,7 +91,7 @@ llm:
       provider: doubao    # 火山方舟协议（复用 images/generations，但请求体为火山格式）
       envKey: "ARK_API_KEY"
       baseURL: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "doubao-seedream-3-0-t2i-250415"
+      model: "doubao-seedream-5-0-pro-260628"
     gemini:
       provider: gemini
       envKey: "GEMINI_API_KEY"
