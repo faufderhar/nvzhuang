@@ -893,12 +893,4 @@ chk "本机验收 fail=0"         'sudo env API_DOMAIN="$API_DOMAIN" FRONTEND_OR
    热备上**不要**运行 standalone/webroot 签发，也不要启用 §9.2 的切换步骤。
 5. **验收**：在热备本机执行 §10.1（`VERIFY_CONNECT_IP=127.0.0.1`），在外部执行 §10.3 并加 `VERIFY_CONNECT_IP=<STANDBY_IP>`（不改 DNS 即可验证热备），都必须 `fail=0`；再做一次 §11.3 实际重启验证。
 6. **DNS 故障切换**：API 域名 A 记录 TTL 设为 60 秒，健康检查探测 `https://<API_DOMAIN>/hello`（期望 200）；主节点失败时切到 `<STANDBY_IP>`。不要配 AAAA。
-7. **每日额度同步（避免切换当天额度翻倍）**：额度计数按节点各自保存在 `quota.db`。主节点每 5 分钟把快照推送到热备，热备后端每 30 秒检查 `/app/data/quota-import.db`，按「取较大值」合并今天和昨天（UTC）的计数后改名为 `quota-import.db.merged-<时间戳>`（损坏的快照改名为 `.bad-<时间戳>`，不影响本地计数）。两边 `config.yaml` 都必须设置 `security.stateDir: "/app/data"`。在主节点：
-   ```bash
-   # 需要主节点 root 到热备 <ADMIN_USER> 的 SSH 免密密钥（可与第 4 步证书同步共用，仅用于这两个用途）
-   sudo /opt/nvzhuang/deploy/host/quota-sync.sh <ADMIN_USER>@<STANDBY_IP> <SSH_PORT>   # 先手工跑一次，热备日志应出现「【额度快照】」
-   echo '*/5 * * * * root /opt/nvzhuang/deploy/host/quota-sync.sh <ADMIN_USER>@<STANDBY_IP> <SSH_PORT> >/dev/null 2>&1' | sudo tee /etc/cron.d/nvzhuang-quota-sync
-   sudo chmod 644 /etc/cron.d/nvzhuang-quota-sync
-   ```
-   剩余差异：切换前最后一次同步之后（最多约 5 分钟）的调用不会带到热备；切回主节点前，在热备上反向执行一次同一脚本（目标改为主节点）。快照只含主体哈希与计数，不含 Token 或个人信息。`.merged-*` 文件可定期删除。
-8. **升级**：两边按 §11.4 用同一个 `NEW_REF`，并重复第 3 步同步镜像，再分别 `dc up -d --no-build` 与验收。
+7. **已知差异**：每日额度计数按节点各自保存（切换当天用户在热备上会重新计数，最多相当于额度翻倍）；升级时两边按 §11.4 用同一个 `NEW_REF`，并重复第 3 步同步镜像，再分别 `dc up -d --no-build` 与验收。

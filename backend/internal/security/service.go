@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
-	"time"
 
 	"github.com/gogf/gf/v2/frame/g"
 )
@@ -56,7 +55,6 @@ func InitService(ctx context.Context) (*Service, error) {
 			return nil, fmt.Errorf("初始化额度持久化存储失败（security.stateDir）: %w", err)
 		}
 		s.DailyQuotaTracker.SetStore(store)
-		go watchQuotaImport(store)
 		g.Log().Info(ctx, "每日额度已启用持久化存储（security.stateDir）")
 	} else {
 		g.Log().Info(ctx, "每日额度为内存计数，进程重启后清零（如需持久化请设置 security.stateDir）")
@@ -78,24 +76,4 @@ func GetService() *Service {
 		}
 	}
 	return defaultService
-}
-
-// watchQuotaImport 每 30 秒检查一次热备额度快照（quota-import.db），存在则合并，见附录 A。
-func watchQuotaImport(store *BoltQuotaStore) {
-	mergeOnce := func() {
-		n, err := store.MergeImport(time.Now())
-		if err != nil {
-			g.Log().Warningf(context.Background(), "【额度快照】合并 %s 失败: %v", QuotaImportFile, err)
-			return
-		}
-		if n > 0 {
-			g.Log().Infof(context.Background(), "【额度快照】已合并 %d 条额度计数", n)
-		}
-	}
-	mergeOnce()
-	t := time.NewTicker(30 * time.Second)
-	defer t.Stop()
-	for range t.C {
-		mergeOnce()
-	}
 }
