@@ -88,7 +88,7 @@ llm:
       provider: doubao
       envKey: "ARK_API_KEY"
       baseURL: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "doubao-seedream-3-0-t2i-250415"
+      model: "doubao-seedream-5-0-flash-260915"
 
     gemini:
       provider: gemini

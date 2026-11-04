@@ -71,16 +71,19 @@ func DoTryonWithValidatedImages(ctx context.Context, personImg, garmentImg *imag
 	return result, gen.Name(), promptStr, nil
 }
 
+// isGPTImageName 判断单个模型名或别名是否属于 GPT-Image 系列（gpt-image / gpt_image，不区分大小写）。
+// 提示词选择与 GPT-Image 视觉预描述必须共用此函数，避免两处判定不一致。
+func isGPTImageName(s string) bool {
+	lower := strings.ToLower(s)
+	return strings.Contains(lower, "gpt-image") || strings.Contains(lower, "gpt_image")
+}
+
 // isGPTImageModel 判断当前请求是否使用 GPT-Image 系列模型
 func isGPTImageModel(model string, clientConfig *ModelConfig, genName string) bool {
-	check := func(s string) bool {
-		lower := strings.ToLower(s)
-		return strings.Contains(lower, "gpt-image") || strings.Contains(lower, "gpt_image")
-	}
-	if check(genName) || check(model) {
+	if isGPTImageName(genName) || isGPTImageName(model) {
 		return true
 	}
-	if clientConfig != nil && (check(clientConfig.Model) || check(clientConfig.Name)) {
+	if clientConfig != nil && (isGPTImageName(clientConfig.Model) || isGPTImageName(clientConfig.Name)) {
 		return true
 	}
 	return false

@@ -91,7 +91,7 @@ llm:
       provider: doubao    # 火山方舟协议（复用 images/generations，但请求体为火山格式）
       envKey: "ARK_API_KEY"
       baseURL: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "doubao-seedream-3-0-t2i-250415"
+      model: "doubao-seedream-5-0-flash-260915"
     gemini:
       provider: gemini
       envKey: "GEMINI_API_KEY"
@@ -223,6 +223,7 @@ security:
   - 文件损坏时自动改名为 `quota.db.corrupt-<时间>` 并重建（当日额度从 0 重新计数）；
   - 运行中存储出错会降级为内存计数并每分钟最多告警一次，`/readyz` 的 `state` 检查项显示为 `fail`；
   - 配置了 `stateDir` 但目录不可写时后端启动失败，避免误以为额度已持久化。
+  - 计数只保存在本节点，主备节点之间不同步：DNS 故障切换当天同一用户的额度最多相当于翻倍（已接受的已知限制，见 `deploy/FIRST-INSTALL.md` 附录 A 第 7 步）。
 - **并发控制**（全局最大 2 并发，单主体最大 1 并发）：默认超过并发上限时立即返回 HTTP 429（`42903`，`CONCURRENCY_LIMITED`，附 `Retry-After: 5`）。设置 `security.concurrency.queueTimeoutSeconds`（0–60，生产建议 10）后，全局已满的请求会先排队等待，超时再返回 429；同一调用方超限始终立即拒绝，排队人数不超过全局并发数的 2 倍，客户端断开即放弃排队。
 - **超时链路**：`llm.requestTimeoutSeconds`（默认 180 秒）是调用云端模型的 HTTP 总超时；反向代理读超时必须更大（Nginx 示例为 300 秒），`shutdown.timeoutSeconds`（默认 190 秒）必须至少大 5 秒，否则启动时打印配置警告。
 - **容量参考（4c24g 单机）**：`concurrency.global: 6`，容器设置 `GOMEMLIMIT=2GiB` 与 3 GiB 内存上限。内存主要来自请求体解析、Base64 解码与图片解码：本地实测单个接近上限（约 20 MB）的请求峰值 RSS 约 230 MiB；`global: 6` 且排队请求也已读入请求体时，18 个同时到达的大请求在 `GOMEMLIMIT=2GiB` 下峰值 RSS 约 1.9 GiB。因此必须同时设置 `GOMEMLIMIT` 与容器内存上限，且不要把 `global` 调得更高。

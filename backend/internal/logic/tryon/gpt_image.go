@@ -97,7 +97,7 @@ type chatVisionResponse struct {
 }
 
 // describeVisualFeatures 调用中转站/OpenAI 的轻量视觉模型提取人像与服装精确特征。
-// 数据流说明：仅当模型名或别名包含 gpt-image 时触发；人像与服装图会额外发送到同一 Base URL 下的
+// 数据流说明：仅当模型名或别名包含 gpt-image 或 gpt_image（不区分大小写）时触发；人像与服装图会额外发送到同一 Base URL 下的
 // 视觉模型（官方 OpenAI 为 gpt-4o-mini，其余中转站为 gemini-3.5-flash-lite），使用同一个 API Key。
 // 该行为已在 DEPLOY.md 的“数据流向”一节中说明。
 func (o *OpenAIImages) describeVisualFeatures(ctx context.Context, personB64, garmentB64 string) string {
@@ -178,7 +178,7 @@ func (o *OpenAIImages) Generate(ctx context.Context, personB64, garmentB64, prom
 	// 针对 GPT-Image 系列：由于 OpenAI / 中转站生图接口会静默忽略 image[] 传参，
 	// 此处先通过极速视觉分析提取人像神态与服装精确单品特征，再透传给 GPT-Image-2，
 	// 确保衣服款式 100% 对齐、人脸神貌高度匹配。
-	isGPT := strings.Contains(strings.ToLower(o.model), "gpt-image") || strings.Contains(strings.ToLower(o.name), "gpt-image")
+	isGPT := isGPTImageName(o.model) || isGPTImageName(o.name)
 	if isGPT {
 		if visualDesc := o.describeVisualFeatures(ctx, personB64, garmentB64); visualDesc != "" {
 			prompt = fmt.Sprintf("Full-body commercial fashion catalog photograph:\n%s\nStrict requirements:\n1. The adult female model from Image 1 is wearing the complete outfit from Image 2 faithfully.\n2. Fully clothed, modest neckline, standard comfortable fit, elegant posture.\n3. Clean daylight studio, neutral minimal background, photorealistic 8k, crisp fabric textures.\nOutput: ONLY the final dressed-up photograph.", visualDesc)

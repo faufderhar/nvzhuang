@@ -364,7 +364,7 @@ Y
       apiKey: ""
       envKey: "ARK_API_KEY"
       baseURL: "https://ark.cn-beijing.volces.com/api/v3"
-      model: "doubao-seedream-3-0-t2i-250415"
+      model: "doubao-seedream-5-0-flash-260915"
 Y
     ;;
     *) echo "未知模型: $1" >&2; return 1 ;;
@@ -893,4 +893,5 @@ chk "本机验收 fail=0"         'sudo env API_DOMAIN="$API_DOMAIN" FRONTEND_OR
    热备上**不要**运行 standalone/webroot 签发，也不要启用 §9.2 的切换步骤。
 5. **验收**：在热备本机执行 §10.1（`VERIFY_CONNECT_IP=127.0.0.1`），在外部执行 §10.3 并加 `VERIFY_CONNECT_IP=<STANDBY_IP>`（不改 DNS 即可验证热备），都必须 `fail=0`；再做一次 §11.3 实际重启验证。
 6. **DNS 故障切换**：API 域名 A 记录 TTL 设为 60 秒，健康检查探测 `https://<API_DOMAIN>/hello`（期望 200）；主节点失败时切到 `<STANDBY_IP>`。不要配 AAAA。
-7. **已知差异**：每日额度计数按节点各自保存（切换当天用户在热备上会重新计数，最多相当于额度翻倍）；升级时两边按 §11.4 用同一个 `NEW_REF`，并重复第 3 步同步镜像，再分别 `dc up -d --no-build` 与验收。
+7. **已知限制（已接受）**：每日额度计数按节点各自保存在本机 `quota.db`，两节点之间**不同步**。DNS 故障切换当天，同一用户在热备上从 0 重新计数，当天实际可用额度最多相当于 `dailyRequestsPerPrincipal` 的 2 倍（切回主节点后沿用主节点原计数）；次日 UTC 零点后恢复正常。如需严格控制成本，切换当天可在热备的 `config.yaml` 临时调低 `dailyRequestsPerPrincipal` 并重启后端。
+8. **升级**：两边按 §11.4 用同一个 `NEW_REF`，并重复第 3 步同步镜像，再分别 `dc up -d --no-build` 与验收。

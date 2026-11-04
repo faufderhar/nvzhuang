@@ -252,3 +252,27 @@ for (const key of ['retryAfterSuffix', 'retryCountdown', 'retryReady', 'aiGatewa
 }
 
 console.log('frontend small-wins tests passed');
+
+// ---------- 历史记录：单条损坏不影响整个列表 ----------
+{
+  const ctx = run([
+    fn('detectImageMimeFromBytes'), fn('normalizeImageMime'), fn('normalizeResultImageBlob'), fn('sanitizeHistoryRecords'),
+    'globalThis.api = { sanitizeHistoryRecords };',
+  ].join('\n'), { Blob, Uint8Array, Array, Object });
+  const png = new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0, 0, 0, 0, 0])], { type: '' });
+  const { valid, badIds } = await ctx.api.sanitizeHistoryRecords([
+    { id: 'ok', image: png, createdAt: 2 },
+    { id: 'no-image', createdAt: 1 },
+    { id: 'not-blob', image: 'garbage' },
+    { id: 'bad-bytes', image: new Blob([new Uint8Array([1, 2, 3])]) },
+    null,
+    { id: 'bad-date', image: png, createdAt: 'x' },
+  ]);
+  assert.equal(JSON.stringify(valid.map(r => r.id)), JSON.stringify(['ok', 'bad-date']));
+  assert.equal(valid[0].image.type, 'image/png');
+  assert.equal(valid[1].createdAt, 0);
+  assert.equal(JSON.stringify(badIds), JSON.stringify(['no-image', 'not-blob', 'bad-bytes']));
+  const empty = await ctx.api.sanitizeHistoryRecords(undefined);
+  assert.equal(JSON.stringify(empty), JSON.stringify({ valid: [], badIds: [] }));
+  console.log('history sanitize tests passed');
+}

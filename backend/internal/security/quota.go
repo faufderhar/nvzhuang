@@ -18,6 +18,9 @@ type DailyQuotaTracker struct {
 	usage       map[string]int
 	lastCleanup time.Time
 
+	// now 返回当前时间，测试可注入以模拟跨 UTC 零点；nil 表示 time.Now。
+	now func() time.Time
+
 	store        QuotaStore
 	degraded     atomic.Bool
 	lastWarnUnix atomic.Int64
@@ -64,7 +67,29 @@ func (q *DailyQuotaTracker) storeFailed(err error) {
 
 func (q *DailyQuotaTracker) storeOK() { q.degraded.Store(false) }
 
+// SetClock 注入时钟（测试用）；nil 恢复为 time.Now。
+func (q *DailyQuotaTracker) SetClock(now func() time.Time) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.now = now
+}
+
+func (q *DailyQuotaTracker) nowUTC() time.Time {
+	if q.now != nil {
+		return q.now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// CheckAndDeduct 检查并扣减当日额度（兼容旧调用；需要退还时请用 Deduct + RefundDay）。
 func (q *DailyQuotaTracker) CheckAndDeduct(principalID string) bool {
+	ok, _ := q.Deduct(principalID)
+	return ok
+}
+
+// Deduct 检查并扣减当日额度，返回是否成功以及扣减所记入的 UTC 日期（YYYY-MM-DD）。
+// 退还时必须把该日期传给 RefundDay，保证跨 UTC 零点的请求退还到扣减的那一天。
+func (q *DailyQuotaTracker) Deduct(principalID string) (bool, string) {
 	if principalID == "" {
 		principalID = "anonymous"
 	}
@@ -72,7 +97,7 @@ func (q *DailyQuotaTracker) CheckAndDeduct(principalID string) bool {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	now := time.Now().UTC()
+	now := q.nowUTC()
 	todayStr := now.Format("2006-01-02")
 	key := principalID + ":" + todayStr
 
@@ -91,28 +116,37 @@ func (q *DailyQuotaTracker) CheckAndDeduct(principalID string) bool {
 		ok, err := q.store.Incr(quotaStoreKey(principalID, todayStr), q.dailyLimit)
 		if err == nil {
 			q.storeOK()
-			return ok
+			return ok, todayStr
 		}
 		q.storeFailed(err)
 	}
 
 	current := q.usage[key]
 	if current >= q.dailyLimit {
-		return false
+		return false, todayStr
 	}
 
 	q.usage[key] = current + 1
-	return true
+	return true, todayStr
 }
 
-// Refund 退还一次当日额度，用于请求在调用上游模型之前就被拒绝的情况（例如参数/配置错误）。
+// Refund 退还一次当日额度（兼容旧调用）。跨零点场景请使用 RefundDay。
 func (q *DailyQuotaTracker) Refund(principalID string) {
+	q.RefundDay(principalID, "")
+}
+
+// RefundDay 把一次额度退还到 day（Deduct 返回的日期），用于请求在调用上游模型之前就被拒绝的情况
+// （例如参数/配置错误）。day 为空时退还到当前 UTC 日期。
+func (q *DailyQuotaTracker) RefundDay(principalID, day string) {
 	if principalID == "" {
 		principalID = "anonymous"
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	today := time.Now().UTC().Format("2006-01-02")
+	today := day
+	if today == "" {
+		today = q.nowUTC().Format("2006-01-02")
+	}
 	if q.store != nil {
 		if err := q.store.Decr(quotaStoreKey(principalID, today)); err == nil {
 			q.storeOK()
@@ -134,7 +168,7 @@ func (q *DailyQuotaTracker) Used(principalID string) int {
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	today := time.Now().UTC().Format("2006-01-02")
+	today := q.nowUTC().Format("2006-01-02")
 	if q.store != nil {
 		if n, err := q.store.Get(quotaStoreKey(principalID, today)); err == nil {
 			return n

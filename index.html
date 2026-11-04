@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <!-- 内容安全策略：禁止加载第三方脚本/插件/表单目标；script-src 不允许 'unsafe-inline'，内联脚本按 sha256 哈希放行（修改内联脚本后运行 node scripts/csp-hashes.mjs --write）；connect-src 允许 https 与本机回环，以支持用户自定义的试穿后端。 -->
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-YxN5Z76KWV8TB2ee703P7Byd9UbTH82Ym1eww61avWs=' 'sha256-tttIjPINOR0K30IlUcU3rx6TdTVYwQCMQh2SVgH4Y18='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:* data: blob:; media-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; worker-src 'none'; manifest-src 'self'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-YxN5Z76KWV8TB2ee703P7Byd9UbTH82Ym1eww61avWs=' 'sha256-9UNlRhvqfvO6pdVuoWEfF3WrnICDfTOsdD8N6jAvjcw='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http://localhost:* http://127.0.0.1:* data: blob:; media-src 'self' data: blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-src 'none'; worker-src 'none'; manifest-src 'self'">
 <meta name="description" content="拍片哥女装 (COSTUME-DB-01) — AI 服装参考图集，收录 1407 套高品质服装图片（2:3），支持一键 AI 试穿换装与中英文双向检索。">
 <title>拍片哥女装 · AI 服装参考图集</title>
 <script>
@@ -1375,7 +1375,7 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
   const PROVIDER_DEFAULTS = {
     gemini: {baseUrl:'https://generativelanguage.googleapis.com/v1beta', model:'gemini-3.1-flash-image'},
     openai: {baseUrl:'https://api.openai.com/v1', model:'gpt-image-2'},
-    doubao: {baseUrl:'https://ark.cn-beijing.volces.com/api/v3', model:'doubao-seedream-3-0-t2i-250415'},
+    doubao: {baseUrl:'https://ark.cn-beijing.volces.com/api/v3', model:'doubao-seedream-5-0-flash-260915'},
     comfyui: {baseUrl:'http://127.0.0.1:8188', model:'qwen-image-edit-2511'}
   };
   const settingsEl = document.getElementById('aiSettings');
@@ -1500,7 +1500,7 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
 
   const getHistoryRecords = async()=>{
     const records = await historyRequest('readonly', store=>store.getAll());
-    return (records || []).sort((a,b)=>(b.createdAt || 0) - (a.createdAt || 0));
+    return (records || []).filter(r=>r && typeof r === "object").sort((a,b)=>(b.createdAt || 0) - (a.createdAt || 0));
   };
   const getHistoryRecord = id=>historyRequest('readonly', store=>store.get(id));
   const putHistoryRecord = record=>historyRequest('readwrite', store=>store.put(record));
@@ -1643,21 +1643,38 @@ $('#mimg').addEventListener('touchend',e=>{if(tx===null)return;const dx=e.change
     }catch(_){ historyCount.hidden = true; }
   }
 
+  // 逐条校验历史记录：任何一条损坏都不能让整个列表渲染失败。
+  // 返回可显示的记录（图片已规范为正确 MIME 的 Blob）和需要清理的记录 id。
+  async function sanitizeHistoryRecords(records){
+    const valid = [];
+    const badIds = [];
+    for(const record of Array.isArray(records) ? records : []){
+      if(!record || typeof record !== 'object'){ continue; }
+      try{
+        const image = await normalizeResultImageBlob(record.image);
+        const createdAt = Number(record.createdAt);
+        valid.push({...record, image, createdAt: Number.isFinite(createdAt) ? createdAt : 0});
+      }catch(_){
+        if(record.id !== undefined && record.id !== null) badIds.push(record.id);
+      }
+    }
+    return {valid, badIds};
+  }
+
   async function renderHistory(){
     releaseHistoryObjectUrls();
     historyGrid.setAttribute('aria-busy', 'true');
     historyMessage.textContent = '';
     try{
       const records = await getHistoryRecords();
-      const displayRecords = await Promise.all(records.map(async record=>{
-        try{
-          return {...record, image: await normalizeResultImageBlob(record.image)};
-        }catch(_){
-          return record;
-        }
-      }));
-      historyClear.disabled = records.length === 0;
-      historyEmpty.hidden = records.length !== 0;
+      const {valid: displayRecords, badIds} = await sanitizeHistoryRecords(records);
+      if(badIds.length){
+        // 损坏的记录（缺图片、图片不是有效 Blob 等）跳过显示，并尽力从存储中删除
+        await Promise.all(badIds.map(id=>deleteHistoryRecord(id).catch(()=>{})));
+        updateHistoryCount();
+      }
+      historyClear.disabled = displayRecords.length === 0;
+      historyEmpty.hidden = displayRecords.length !== 0;
       historyGrid.innerHTML = displayRecords.map(record=>{
         const imageUrl = URL.createObjectURL(record.image);
         historyObjectUrls.push(imageUrl);
