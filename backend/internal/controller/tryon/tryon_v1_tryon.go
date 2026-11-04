@@ -66,7 +66,8 @@ func (c *ControllerV1) Tryon(ctx context.Context, req *v1.TryonReq) (res *v1.Try
 	}
 
 	// 3. 检查并原子扣减每日调用额度
-	if !secService.DailyQuotaTracker.CheckAndDeduct(principalID) {
+	quotaOK, quotaDay := secService.DailyQuotaTracker.Deduct(principalID)
+	if !quotaOK {
 		middleware.WriteAPIError(r, security.ErrDailyQuotaExceeded)
 		return nil, nil
 	}
@@ -94,7 +95,7 @@ func (c *ControllerV1) Tryon(ctx context.Context, req *v1.TryonReq) (res *v1.Try
 	if err != nil {
 		// 参数/模型配置错误发生在调用上游之前，没有产生成本，退还额度
 		if !errors.Is(err, security.ErrUpstreamFailed) && gerror.Code(err) == gcode.CodeInvalidParameter {
-			secService.DailyQuotaTracker.Refund(principalID)
+			secService.DailyQuotaTracker.RefundDay(principalID, quotaDay)
 		}
 		return nil, err
 	}
