@@ -149,7 +149,7 @@ nvzhuang/
 以下行为均有回归测试覆盖，修改相关代码时不得削弱：
 
 1. **路由与中间件**：受保护接口（`/tryon`、`/comfyui/health`）在 `cmd.RegisterRoutes` 中以路由组挂载 `BodyLimit → Auth → RateLimit → TryonGate`，不依赖 `r.URL.Path` 精确匹配；需要按路径判断时一律先 `middleware.NormalizePath`。`//tryon`、`/tryon/` 等写法必须同样被拦截。外层组依次为 `RequestID → HandlerResponse → CORS`。`TryonGate` 在框架解析请求体**之前**对 `POST /tryon`（含各种路径写法）只接受 `application/json`（否则 400 `INVALID_REQUEST`），并先占用并发槽位（满则 429 `CONCURRENCY_LIMITED`），不得移到解析之后。
-2. **SSRF 防护（`logic/tryon/netguard.go`）**：浏览器传入的 `client_config` 视为不可信——Base URL 必须 HTTPS、无用户信息，域名在 `security.clientModelAllowedHosts` 白名单内（精确主机名或 `*.后缀`，默认三家官方域名 + 服务端 `llm.models` 的 HTTPS 域名，拒绝提示为固定文案、不回显白名单），端口在 `security.clientModelAllowedPorts`（默认 `[443]`）内；拒绝 localhost 与 IANA 特殊用途地址全表（含 CGNAT/云元数据 `100.100.100.200`、`169.254/16`、`198.18/15`、NAT64、6to4、IPv4 映射地址等），并在**拨号阶段**对 DNS 解析结果再次校验（防 DNS rebinding），不走系统代理。
+2. **SSRF 防护（`logic/tryon/netguard.go`）**：浏览器传入的 `client_config` 视为不可信——Base URL 必须 HTTPS、无用户信息，域名在 `security.clientModelAllowedHosts` 白名单内（精确主机名或 `*.后缀`，默认 OpenAI、火山方舟、Gemini、xAI 官方域名 + 服务端 `llm.models` 的 HTTPS 域名，拒绝提示为固定文案、不回显白名单），端口在 `security.clientModelAllowedPorts`（默认 `[443]`）内；拒绝 localhost 与 IANA 特殊用途地址全表（含 CGNAT/云元数据 `100.100.100.200`、`169.254/16`、`198.18/15`、NAT64、6to4、IPv4 映射地址等），并在**拨号阶段**对 DNS 解析结果再次校验（防 DNS rebinding），不走系统代理。
 3. **结果图片下载**：上游返回的 URL 默认按不可信处理（仅 HTTPS 公网 443）；仅当模型来自服务端配置、且结果地址与其 `baseURL` 同源时才使用可信客户端（允许内网/http/非 443）。下载不携带任何鉴权头，限制大小与重定向次数。
 4. **重定向与响应体**：模型接口只允许同协议同主机重定向（最多 3 次，防 `x-goog-api-key` 等外泄）；上游响应体限量读取（生成结果 64 MiB、视觉 1 MiB、错误体 4 KiB）。
 5. **远程地址 HTTPS**：服务端与前端对非本机地址一律要求 HTTPS；只有本机回环允许 http。

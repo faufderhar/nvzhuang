@@ -116,7 +116,8 @@ llm:
 ```
 
 > 关键点：
-> - `provider: openai` 表示走标准的 `POST {baseURL}/images/generations` + `input` 数组协议（OpenAI 官方 GPT-Image、通义万相、智谱 CogView、多数中转站）。把 baseURL 换成服务商地址、model 换成其模型 ID 即可。
+> - `provider: openai` 表示走 OpenAI Images 兼容协议（OpenAI 官方 GPT-Image、通义万相、智谱 CogView、多数中转站）：`POST {baseURL}/images/generations`，用 `prompt` + `image[]` 传人像和服装。把 baseURL 换成服务商地址、model 换成其模型 ID 即可。
+> - 模型名包含 `grok-imagine-image`（如 `grok-imagine-image-2.0`）时例外：xAI 的 `/images/generations` 是文生图，会忽略参考图。后端改走 `POST {baseURL}/images/edits`，`images` 顺序为第 1 张人物、第 2 张服装。Base URL 填 `https://api.x.ai/v1`。
 > - `provider: doubao` 走火山方舟协议（同样是 `/images/generations`，但请求体用 `prompt` + `image[]` 多图生图，返回 `url`），适配豆包 Seedream 换装。
 > - `provider: gemini` 走 Google 原生 `generateContent` 协议。
 > 前端模型下拉框在 `index.html` 的 `<select id="aiModel">` 中增减 `<option>` 即可与后端别名对应。
@@ -241,7 +242,7 @@ security:
 - Key 仅保存在服务器本地环境变量或 `.env`，禁止将包含真实 Key 的 `config.yaml` 或 `.env` 提交到公开仓库。
 - 默认的「服务器预设」模式下，前端不接触服务器 API Key，所有大模型通信均由后端代理中转。
 - 可选的「个人模型配置」由用户主动保存在自己的浏览器，并只随单次 `/tryon` 请求发送。后端不写数据库、配置文件或业务日志；Gemini Key 使用请求头传递，不进入上游 URL。
-- 个人 Base URL 必须为 `https://`、域名必须在 `security.clientModelAllowedHosts` 白名单内（精确主机名或 `*.example.com` 子域名通配；不写时默认 `api.openai.com`、`ark.cn-beijing.volces.com`、`generativelanguage.googleapis.com`，服务端 `llm.models` 中 HTTPS baseURL 的域名启动时自动追加；不在白名单返回 400 且不回显白名单内容）、端口默认只能是 443（可通过 `security.clientModelAllowedPorts` 追加，如 `[443, 8443]`），不允许用户名密码、查询参数与片段；拒绝 localhost、内网、CGNAT（含云厂商元数据 100.100.100.200）、NAT64/6to4 等全部 IANA 特殊用途地址，并在建立连接时对 DNS 解析结果再次校验，避免公开后端被滥用为 SSRF 代理。
+- 个人 Base URL 必须为 `https://`、域名必须在 `security.clientModelAllowedHosts` 白名单内（精确主机名或 `*.example.com` 子域名通配；不写时默认 `api.openai.com`、`ark.cn-beijing.volces.com`、`generativelanguage.googleapis.com`、`api.x.ai`，服务端 `llm.models` 中 HTTPS baseURL 的域名启动时自动追加；不在白名单返回 400 且不回显白名单内容）、端口默认只能是 443（可通过 `security.clientModelAllowedPorts` 追加，如 `[443, 8443]`），不允许用户名密码、查询参数与片段；拒绝 localhost、内网、CGNAT（含云厂商元数据 100.100.100.200）、NAT64/6to4 等全部 IANA 特殊用途地址，并在建立连接时对 DNS 解析结果再次校验，避免公开后端被滥用为 SSRF 代理。
 - 上游重定向：模型接口只允许同协议同主机的重定向（最多 3 次），防止 `x-goog-api-key` 等自定义头被转发到其他主机；结果图片下载只允许 HTTPS。
 - 结果图片地址：浏览器自定义模型返回的结果 URL 一律按不可信处理（仅 HTTPS 公网地址）；服务端 `config.yaml` 中配置的模型若返回与其 `baseURL` **同源**（协议、主机、端口均相同）的结果地址，则视为可信，允许是内网、`http://` 或非 443 端口的自建中转站；其它来源的结果地址仍按不可信处理。下载结果图片时不携带任何鉴权头。
 - 上游响应体积：模型响应上限 64 MiB，错误响应只读取前 4 KiB，视觉分析响应上限 1 MiB。
@@ -255,7 +256,7 @@ security:
 ### 7. 数据流向说明
 - 「服务器预设」模式：用户照片只发送给 `config.yaml` 中配置的模型服务。
 - 「个人模型配置」模式：照片与 Key 只发送给用户自己填写的 Base URL。
-- **GPT Image 系列额外的视觉分析**：模型名或别名包含 `gpt-image` 时，后端会先把人像与服装图发送到**同一 Base URL** 下的轻量视觉模型（官方 OpenAI 为 `gpt-4o-mini`，其他中转站为 `gemini-3.5-flash-lite`）提取文字特征，再调用生图接口。因此同一张照片会产生两次上游调用，请确认你的服务商允许并知悉该用途。
+- **GPT Image 系列额外的视觉分析**：模型名或别名包含 `gpt-image` 时，后端会先把人像与服装图发送到**同一 Base URL** 下的轻量视觉模型（官方 OpenAI 为 `gpt-4o-mini`，其他中转站为 `gemini-3.5-flash-lite`）提取文字特征，再调用生图接口。因此同一张照片会产生两次上游调用，请确认你的服务商允许并知悉该用途。`grok-imagine-image` 不走这步，两张参考图只发给 `{baseURL}/images/edits`。
 - 本地 ComfyUI：照片上传到 ComfyUI 主机（见下一节的清理说明）。
 
 ### 8. ComfyUI 隐私与清理

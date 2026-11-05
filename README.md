@@ -59,6 +59,7 @@
 | `gemini` | **Nano Banana 2**（`gemini-3.1-flash-image`） | Google generateContent | **云端推荐默认**，对真人换装场景无 moderation 阻断 |
 | `doubao` | 豆包 Seedream（火山方舟） | 火山方舟 | 国内可用，无需代理网络 |
 | `gpt-image` | **GPT Image 2**（`gpt-image-2`） | OpenAI Images | 兼容 OpenAI 协议，支持第三方中转与代理 |
+| `grok`（配置示例，默认注释） | **Grok Imagine**（`grok-imagine-image-2.0`） | xAI 多图编辑 | 个人配置协议选 OpenAI 兼容，Base URL 填 `https://api.x.ai/v1`。参考图走 `/images/edits` |
 | `qwen` / `zhipu` / `siliconflow` … | 通义万相 / 智谱 CogView / 硅基流动 | OpenAI Images 兼容 | 按需在配置中开启 |
 
 > 三个关键点都可配置：**API Key、Base URL、模型名**。加一个国内模型只需在配置里新增一段，无需改代码。
@@ -66,7 +67,7 @@
 前端 AI 试穿页右上角提供「设置中心」，支持两种使用方式：
 
 1. **服务器预设**：继续使用后端 `config.yaml` / 环境变量中的模型配置。
-2. **个人模型配置**：在当前浏览器保存协议、Base URL、API Key 和模型名，生成时随本次请求临时发送给后端。后端不把这些字段写入数据库、配置文件或业务日志。Base URL 必须是 HTTPS，且域名需在服务端白名单内（默认 OpenAI、火山方舟、Gemini 官方地址及服务端已配置模型的域名，管理员可在 `security.clientModelAllowedHosts` 中追加）。
+2. **个人模型配置**：在当前浏览器保存协议、Base URL、API Key 和模型名，生成时随本次请求临时发送给后端。后端不把这些字段写入数据库、配置文件或业务日志。Base URL 必须是 HTTPS，且域名需在服务端白名单内（默认 OpenAI、火山方舟、Gemini、xAI 官方地址及服务端已配置模型的域名，管理员可在 `security.clientModelAllowedHosts` 中追加）。
 
 > 浏览器本地保存适合个人设备使用。共享设备使用完毕后，请在设置中心点击「清除本地配置」。个人 Base URL 默认禁止指向 localhost、内网和保留地址，避免公开后端被用作内网请求代理。
 

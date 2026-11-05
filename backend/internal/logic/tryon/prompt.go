@@ -23,6 +23,15 @@ func BuildDefault(lang string) string {
 	return enPrompt
 }
 
+// BuildGrok 构建 grok-imagine-image 多图编辑提示词。
+// 参考图顺序固定为第 1 张人物、第 2 张服装；必须明确禁止把服装图里的模特一起合成进来。
+func BuildGrok(lang string) string {
+	if lang == "zh" {
+		return grokZhPrompt
+	}
+	return grokEnPrompt
+}
+
 // gptSafetyEnPrompt GPT-Image-2 专用英文防封控安全提示词
 const gptSafetyEnPrompt = `Task: Professional commercial fashion virtual try-on photograph.
 
@@ -74,3 +83,39 @@ const zhPrompt = `你是一名专业的时尚虚拟试衣助手。
 6. 逼真、高细节、专业时尚大片质感、8k、自然皮肤纹理。
 
 输出：仅输出最终的换装照片，不要其他内容。`
+
+// grokEnPrompt grok-imagine-image 多图编辑：第 1 张是人物，第 2 张只提供服装。
+const grokEnPrompt = `You are a professional fashion virtual try-on assistant.
+
+The reference images are ordered:
+- Image 1 is the person. This is the only person who may appear in the result.
+- Image 2 is the clothing reference only. Use its garments, and nothing else from that photo.
+
+Task: Dress the person from Image 1 in the exact outfit from Image 2, and output one photorealistic photo.
+
+Strict requirements:
+1. Keep Image 1 exactly: same face, facial features, skin tone, hairstyle, body proportions, pose, camera angle, background, and lighting. Do not replace this person.
+2. Reproduce Image 2's outfit exactly: colors, patterns, fabric, neckline, sleeves, hem length, shoes, and accessories. Do not redesign, simplify, or substitute a different outfit.
+3. Do not copy the model, face, body, pose, or background from Image 2. Do not show both people. Do not add anyone else.
+4. The outfit must follow the body with natural folds, shadows, and highlights consistent with Image 1's lighting.
+5. Photorealistic, high detail, natural skin texture.
+
+Output only the final photograph.`
+
+// grokZhPrompt grok-imagine-image 多图编辑中文提示词。
+const grokZhPrompt = `你是一名专业的时尚虚拟试衣助手。
+
+参考图顺序如下：
+- 第 1 张是人物。结果里只允许出现这个人。
+- 第 2 张只作为服装参考。只使用其中的服装，不要使用这张照片里的其他内容。
+
+任务：让第 1 张里的人物穿上第 2 张里的整套服装，输出一张逼真照片。
+
+严格要求：
+1. 完整保留第 1 张的人物：相同的脸、五官、肤色、发型、身材比例、姿势、机位、背景和光线。不得换成另一个人。
+2. 原样还原第 2 张的服装：颜色、图案、面料、领型、袖长、下摆、鞋子和配饰。不得重新设计、简化或换成另一套衣服。
+3. 不得复制第 2 张里的模特、脸、身材、姿势或背景。不得把两个人同时画进画面，也不得添加其他人。
+4. 服装必须贴合第 1 张人物的身体，并与其原有光线形成自然的褶皱、阴影和高光。
+5. 逼真、高细节、自然皮肤纹理。
+
+只输出最终的换装照片。`

@@ -128,7 +128,7 @@ cp manifest/config/config.example.yaml manifest/config/config.yaml
 | lang | 提示词语言 `zh`/`en` | `zh` |
 | client_config | 可选的浏览器个人模型配置；仅在当前请求内存中使用，不持久化、不记录 Key/Base URL | 空（使用服务器预设） |
 
-`client_config.provider` 支持 `openai`、`doubao`、`gemini`。个人 Base URL 必须是 HTTP/HTTPS 公网地址，且不能包含账号、查询参数或片段；localhost、内网和保留地址会被拒绝，以降低 SSRF 风险。ComfyUI 不接受 `client_config`，只使用后端本机配置。
+`client_config.provider` 支持 `openai`、`doubao`、`gemini`。个人 Base URL 必须是 HTTP/HTTPS 公网地址，且不能包含账号、查询参数或片段；localhost、内网和保留地址会被拒绝，以降低 SSRF 风险。ComfyUI 不接受 `client_config`，只使用后端本机配置。使用 `grok-imagine-image-2.0` 时协议仍填 `openai`，Base URL 填 `https://api.x.ai/v1`；后端会把人像和服装发到 `/images/edits`，文生图接口会忽略这两张参考图。
 
 响应：
 

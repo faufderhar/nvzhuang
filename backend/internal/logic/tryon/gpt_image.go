@@ -174,6 +174,10 @@ func (o *OpenAIImages) Generate(ctx context.Context, personB64, garmentB64, prom
 	if o.apiKey == "" {
 		return "", fmt.Errorf("模型 %s 未配置 API Key", o.name)
 	}
+	// grok-imagine-image 的 /images/generations 是文生图，会丢掉 image[]，结果既不像上传的人也不像所选服装。
+	if isGrokImagineImageName(o.model) {
+		return o.generateGrokImagine(ctx, personB64, garmentB64, prompt, size)
+	}
 
 	// 针对 GPT-Image 系列：由于 OpenAI / 中转站生图接口会静默忽略 image[] 传参，
 	// 此处先通过极速视觉分析提取人像神态与服装精确单品特征，再透传给 GPT-Image-2，
@@ -200,18 +204,19 @@ func (o *OpenAIImages) Generate(ctx context.Context, personB64, garmentB64, prom
 		Quality: "high",
 	}
 
-	return postImageGeneration(ctx, o.client, o.baseURL, o.apiKey, reqBody, "图像 API", o.resultOrigin)
+	return postImageGeneration(ctx, o.client, o.baseURL+"/images/generations", o.apiKey, reqBody, "图像 API", o.resultOrigin)
 }
 
-// postImageGeneration 调用 POST {baseURL}/images/generations 并取出结果图（优先 b64_json，其次下载 url）。
+// postImageGeneration 调用图像接口并取出结果图（优先 b64_json，其次下载 url）。
+// endpoint 为完整地址，例如 {baseURL}/images/generations 或 grok 换装用的 {baseURL}/images/edits。
 // label 用于错误信息前缀，如「图像 API」「豆包 API」。
-func postImageGeneration(ctx context.Context, client *http.Client, baseURL, apiKey string, reqBody any, label, resultOrigin string) (string, error) {
+func postImageGeneration(ctx context.Context, client *http.Client, endpoint, apiKey string, reqBody any, label, resultOrigin string) (string, error) {
 	body, err := json.Marshal(reqBody)
 	if err != nil {
 		return "", err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/images/generations", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("模型服务请求创建失败")
 	}

@@ -53,7 +53,10 @@ func DoTryonWithValidatedImages(ctx context.Context, personImg, garmentImg *imag
 
 	var promptStr string
 	isGemini := (clientConfig != nil && strings.EqualFold(clientConfig.Provider, "gemini")) || gen.Name() == "gemini"
-	if isGPTImageModel(model, clientConfig, gen.Name()) {
+	if isGrokImagineImage(gen) {
+		// 多图编辑按参考图顺序理解人物和服装，不能用「文生图式」的泛化描述。
+		promptStr = BuildGrok(lang)
+	} else if isGPTImageModel(model, clientConfig, gen.Name()) {
 		promptStr = BuildGPTSafety(lang)
 	} else if isGemini {
 		promptStr = BuildGemini(lang)
@@ -69,6 +72,20 @@ func DoTryonWithValidatedImages(ctx context.Context, personImg, garmentImg *imag
 	}
 
 	return result, gen.Name(), promptStr, nil
+}
+
+// isGrokImagineImageName 判断上游模型 ID 是否为 xAI 的 grok-imagine-image 图像模型。
+// 这类模型的文生图接口会忽略参考图；换装必须走多图编辑。视频模型不含 image，不在此列。
+func isGrokImagineImageName(s string) bool {
+	lower := strings.ToLower(s)
+	return strings.Contains(lower, "grok-imagine-image") || strings.Contains(lower, "grok_imagine_image")
+}
+
+// isGrokImagineImage 判断已创建的适配器是否会把请求发给 grok-imagine-image。
+// 只看上游模型 ID，不看前端别名，避免别名碰巧含有该字符串时走错协议。
+func isGrokImagineImage(gen ImageGenerator) bool {
+	o, ok := gen.(*OpenAIImages)
+	return ok && isGrokImagineImageName(o.model)
 }
 
 // isGPTImageName 判断单个模型名或别名是否属于 GPT-Image 系列（gpt-image / gpt_image，不区分大小写）。

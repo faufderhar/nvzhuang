@@ -78,6 +78,7 @@ var DefaultClientModelAllowedHosts = []string{
 	"api.openai.com",
 	"ark.cn-beijing.volces.com",
 	"generativelanguage.googleapis.com",
+	"api.x.ai",
 }
 
 var hostnamePattern = regexp.MustCompile(`^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)

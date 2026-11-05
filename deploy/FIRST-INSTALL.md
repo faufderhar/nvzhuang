@@ -143,7 +143,7 @@ getent ahostsv6 "$API_DOMAIN" | grep -v '::ffff:' | awk '{print $1}' | sort -u
 
 ```bash
 for u in https://download.docker.com https://registry-1.docker.io/v2/ https://github.com \
-         https://generativelanguage.googleapis.com https://api.openai.com https://ark.cn-beijing.volces.com; do
+         https://generativelanguage.googleapis.com https://api.openai.com https://ark.cn-beijing.volces.com https://api.x.ai; do
   printf '%-45s %s\n' "$u" "$(curl -sS -o /dev/null -m 10 -w '%{http_code}' "$u" 2>&1)"
 done
 ```
@@ -396,7 +396,7 @@ security:
   trustedProxies: ["172.30.0.2/32"]
   clientModelAllowedPorts: [443]
   # 个人模型 Base URL 域名白名单；不写时默认 OpenAI / 火山方舟 / Gemini 官方域名 + 上面 llm.models 中 HTTPS baseURL 的域名
-  # clientModelAllowedHosts: ["api.openai.com", "ark.cn-beijing.volces.com", "generativelanguage.googleapis.com"]
+  # clientModelAllowedHosts: ["api.openai.com", "ark.cn-beijing.volces.com", "generativelanguage.googleapis.com", "api.x.ai"]
   stateDir: "/app/data"
   rateLimit:
     requestsPerMinute: 10

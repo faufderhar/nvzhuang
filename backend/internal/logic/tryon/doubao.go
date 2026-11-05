@@ -84,7 +84,7 @@ func (d *Doubao) Generate(ctx context.Context, personB64, garmentB64, prompt, si
 		Watermark:      false,
 	}
 
-	return postImageGeneration(ctx, d.client, d.baseURL, d.apiKey, reqBody, "豆包 API", d.resultOrigin)
+	return postImageGeneration(ctx, d.client, d.baseURL+"/images/generations", d.apiKey, reqBody, "豆包 API", d.resultOrigin)
 }
 
 // isDoubaoTextOnlyModel 识别只支持文生图（不接受参考图）的豆包模型，如 doubao-seedream-3-0-t2i-250415。

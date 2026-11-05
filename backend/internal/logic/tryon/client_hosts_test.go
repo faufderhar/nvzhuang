@@ -42,6 +42,7 @@ func TestValidateClientModelConfigHostAllowlist(t *testing.T) {
 		"https://API.OpenAI.com./v1",
 		"https://ark.cn-beijing.volces.com/api/v3",
 		"https://generativelanguage.googleapis.com/v1beta",
+		"https://api.x.ai/v1",
 	} {
 		cfg := base
 		cfg.BaseURL = raw
